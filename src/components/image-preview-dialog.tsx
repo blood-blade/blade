@@ -190,7 +190,30 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
 
   // Normalize crop updates (ReactCrop may use different units) and prevent overwriting
   const handleCropChange = (c: Crop) => {
-    // Ensure unit is percent for our calculations
+    // ReactCrop sometimes returns pixel-based crop (unit === 'px'). Our
+    // downstream code expects percentages. If we have pixel units and the
+    // image is loaded, convert to percentages using natural dimensions.
+    const incomingUnit = (c as any).unit || '%';
+    if (incomingUnit === 'px' && imgRef.current) {
+      const iw = imgRef.current.naturalWidth || imgRef.current.width;
+      const ih = imgRef.current.naturalHeight || imgRef.current.height;
+      const pxX = (c.x as number) || 0;
+      const pxY = (c.y as number) || 0;
+      const pxW = (c.width as number) || 0;
+      const pxH = (c.height as number) || 0;
+
+      const normalized: Crop = {
+        unit: '%',
+        x: (pxX / iw) * 100,
+        y: (pxY / ih) * 100,
+        width: (pxW / iw) * 100,
+        height: (pxH / ih) * 100,
+      };
+      setCrop(normalized);
+      return;
+    }
+
+    // Otherwise store as-percent (or whatever unit is provided)
     const unit = (c as any).unit || '%';
     const normalized = { ...c, unit } as Crop;
     setCrop(normalized);
