@@ -39,16 +39,14 @@ export function UserAvatar({ user, className, isFriend }: UserAvatarProps) {
         className
       )}>
         {canDisplayImage ? (
-          // --- Avatar Centering and Cropping Logic ---
-          // Instead of using <AvatarImage> with object-fit, which can be unreliable for non-square images,
-          // we use a div with a background image.
-          // - `backgroundSize: 'cover'` scales the image to be as large as possible without stretching,
-          //   ensuring it completely fills the circular container.
-          // - `backgroundPosition: 'center'` ensures the image is centered within the container.
-          // This combination effectively creates a perfect, centered circular crop of the image.
-          <div
-            className="w-full h-full rounded-full bg-cover bg-center"
-            style={{ backgroundImage: `url(${photoURL})` }}
+          <AvatarImage
+            src={photoURL}
+            alt={name || 'User avatar'}
+            className="object-cover"
+            style={{ 
+              objectPosition: 'center center',
+              imageRendering: 'high-quality'
+            }}
           />
         ) : (
           <AvatarFallback>{fallback}</AvatarFallback>

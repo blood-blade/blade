@@ -28,15 +28,27 @@ function centerAspectCrop(
   mediaHeight: number,
   aspect: number,
 ): Crop {
-  // Calculate the minimum dimension to ensure the crop is centered and square
-  const minDimension = Math.min(mediaWidth, mediaHeight);
-  const cropWidth = (minDimension / mediaWidth) * 100; // Convert to percentage
+  // For square aspect ratio (avatar)
+  if (aspect === 1) {
+    const size = Math.min(mediaWidth, mediaHeight);
+    const x = (mediaWidth - size) / 2;
+    const y = (mediaHeight - size) / 2;
+    
+    return {
+      unit: '%',
+      x: (x / mediaWidth) * 100,
+      y: (y / mediaHeight) * 100,
+      width: (size / mediaWidth) * 100,
+      height: (size / mediaHeight) * 100,
+    };
+  }
   
+  // For other aspect ratios, use the original centerCrop
   return centerCrop(
     makeAspectCrop(
       {
         unit: '%',
-        width: cropWidth, // Use the calculated width
+        width: 90,
       },
       aspect,
       mediaWidth,
@@ -68,51 +80,55 @@ async function getCroppedCircularImage(
   }
 
   // --- Avatar Cropping Logic ---
-  // The following section implements the high-quality circular crop.
-
   const pixelRatio = window.devicePixelRatio || 1;
   const desiredSize = 400; // Fixed size for avatars (400x400 pixels)
-
-  // Calculate the source crop region in pixels
-  const cropX = (crop.x / 100) * image.naturalWidth;
-  const cropY = (crop.y / 100) * image.naturalHeight;
-  const cropWidth = (crop.width / 100) * image.naturalWidth;
-  const cropHeight = (crop.height / 100) * image.naturalHeight;
   
-  // Set canvas to our desired size, scaled for high DPI
+  // Set up the canvas for high-quality output
   canvas.width = desiredSize * pixelRatio;
   canvas.height = desiredSize * pixelRatio;
-
-  // Scale everything for high DPI
-  ctx.scale(pixelRatio, pixelRatio);
+  
+  // Enable high-quality image processing
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // Center point and radius for our circle
-  const centerX = desiredSize / 2;
-  const centerY = desiredSize / 2;
-  const radius = desiredSize / 2;
+  // Calculate the crop region in original image coordinates
+  const sourceX = Math.round((crop.x / 100) * image.naturalWidth);
+  const sourceY = Math.round((crop.y / 100) * image.naturalHeight);
+  const sourceWidth = Math.round((crop.width / 100) * image.naturalWidth);
+  const sourceHeight = Math.round((crop.height / 100) * image.naturalHeight);
+
+  // Calculate the drawing dimensions
+  const outputSize = desiredSize * pixelRatio;
+  const centerX = outputSize / 2;
+  const centerY = outputSize / 2;
+  const radius = outputSize / 2;
 
   // Create a circular clipping path
+  ctx.save();
   ctx.beginPath();
-  ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI, false);
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2, true);
+  ctx.closePath();
   ctx.clip();
 
-  // Clear the entire canvas first (important for transparency)
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Fill with transparent background
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.fillRect(0, 0, outputSize, outputSize);
 
-  // Draw the cropped portion of the source image onto the canvas, scaling to fit our desired size
+  // Draw the image
   ctx.drawImage(
     image,
-    cropX,
-    cropY,
-    cropWidth,
-    cropHeight,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
     0,
     0,
-    desiredSize,
-    desiredSize
+    outputSize,
+    outputSize
   );
+
+  // Restore the context
+  ctx.restore();
   
   // --- End of Avatar Cropping Logic ---
 
@@ -222,28 +238,33 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
         <div className="flex items-center justify-center p-4 bg-muted/30 rounded-lg max-h-[50vh] min-h-[200px]">
           {isImage && previewUrl && (
             mode === 'avatar' ? (
-              <ReactCrop
-                crop={crop}
-                onChange={c => setCrop(c)}
-                circularCrop
-                aspect={1}
-                minWidth={100}
-                minHeight={100}
-                keepSelection
-                className="max-w-full"
-              >
-                <img
-                  ref={imgRef}
-                  src={previewUrl}
-                  alt="Image preview"
-                  style={{ 
-                    maxHeight: '50vh',
-                    maxWidth: '100%',
-                    display: 'block',
-                    margin: '0 auto'
-                  }}
-                  onLoad={onImageLoad}
-                />
+              <div className="relative max-w-full mx-auto" style={{ maxHeight: '50vh' }}>
+                <ReactCrop
+                  crop={crop}
+                  onChange={c => setCrop(c)}
+                  circularCrop
+                  aspect={1}
+                  minWidth={100}
+                  minHeight={100}
+                  keepSelection
+                  className="max-h-full"
+                >
+                  <img
+                    ref={imgRef}
+                    src={previewUrl}
+                    alt="Image preview"
+                    style={{ 
+                      maxHeight: '50vh',
+                      width: 'auto',
+                      height: 'auto',
+                      display: 'block',
+                      margin: '0 auto',
+                      objectFit: 'contain'
+                    }}
+                    onLoad={onImageLoad}
+                  />
+                </ReactCrop>
+              </div>
               </ReactCrop>
             ) : (
               <NextImage
