@@ -1,0 +1,9 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M24 0L29.2945 18.7055L48 24L29.2945 29.2945L24 48L18.7055 29.2945L0 24L18.7055 18.7055L24 0Z" fill="url(#gemini-gradient)"/>
+<defs>
+<radialGradient id="gemini-gradient" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(24 24) rotate(90) scale(24)">
+<stop stop-color="#A4C2FF"/>
+<stop offset="1" stop-color="#FFFFFF"/>
+</radialGradient>
+</defs>
+</svg>

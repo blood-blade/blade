@@ -1,0 +1,21 @@
+
+/* This file is only loaded when the mobile_redesign feature flag is on */
+body[data-mobile="true"] .desktop-only {
+    display: none;
+}
+
+body[data-mobile="true"] .mobile-only {
+    display: flex; /* Or block, grid, etc., as needed */
+}
+
+/* By default, hide mobile-only content if JS is off or feature flag is not set */
+.mobile-only {
+    display: none;
+}
+
+/* Explicitly hide mobile-only elements on desktop screens */
+@media (min-width: 769px) {
+    .mobile-only {
+        display: none !important;
+    }
+}
