@@ -43,3 +43,5 @@ database-debug.log
 
 # Git backup
 .git_backup/
+
+.vercel

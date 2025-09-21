@@ -308,9 +308,18 @@ export default function SignupPage() {
               <Input
                 id="verification-code"
                 type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck="false"
                 placeholder="000000"
                 value={verificationCode}
-                onChange={(e) => setVerificationCode(e.target.value)}
+                onChange={(e) => {
+                  // Only allow numbers
+                  const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  setVerificationCode(value);
+                }}
                 disabled={isVerifying}
                 maxLength={6}
                 className="text-center text-lg tracking-widest"
