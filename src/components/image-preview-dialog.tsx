@@ -153,6 +153,8 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
 
   const [crop, setCrop] = useState<Crop>();
   const imgRef = useRef<HTMLImageElement | null>(null);
+  // Track whether we've set the initial crop for the current image to avoid overwriting user changes
+  const initialCropSet = useRef(false);
 
   useEffect(() => {
     if (!file || !file.type) {
@@ -160,7 +162,10 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
       return;
     }
     const url = URL.createObjectURL(file);
+    // Reset preview URL and initial-crop flag so a new image starts fresh
     setPreviewUrl(url);
+    initialCropSet.current = false;
+    setCrop(undefined);
 
     return () => {
       URL.revokeObjectURL(url);
@@ -173,10 +178,22 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
   const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     imgRef.current = e.currentTarget;
     if (mode === 'avatar') {
-      const { width, height } = e.currentTarget;
-      // Set a centered, 1:1 aspect ratio crop.
-      setCrop(centerAspectCrop(width, height, 1 / 1));
+      // Only set the initial centered crop if we haven't done so for this image.
+      if (!initialCropSet.current) {
+        // Use natural dimensions for a more accurate initial crop calculation
+        const { naturalWidth, naturalHeight } = e.currentTarget;
+        setCrop(centerAspectCrop(naturalWidth, naturalHeight, 1));
+        initialCropSet.current = true;
+      }
     }
+  };
+
+  // Normalize crop updates (ReactCrop may use different units) and prevent overwriting
+  const handleCropChange = (c: Crop) => {
+    // Ensure unit is percent for our calculations
+    const unit = (c as any).unit || '%';
+    const normalized = { ...c, unit } as Crop;
+    setCrop(normalized);
   };
 
   const handleSend = async () => {
@@ -241,7 +258,7 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
               <div className="relative max-w-full mx-auto" style={{ maxHeight: '50vh' }}>
                 <ReactCrop
                   crop={crop}
-                  onChange={c => setCrop(c)}
+                  onChange={handleCropChange}
                   circularCrop
                   aspect={1}
                   minWidth={100}
