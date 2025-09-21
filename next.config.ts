@@ -21,12 +21,37 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Optimize compilation
+  compiler: {
+    // Enables the styled-components SWC transform
+    styledComponents: true,
+    // Remove console logs in production
+    removeConsole: process.env.NODE_ENV === 'production',
+  },
   // Optimize for development
   webpack: (config, { dev, isServer }) => {
-    // Optimization for development mode
+    // Development optimizations
     if (dev) {
-      config.optimization.minimize = false;
-      config.optimization.minimizer = [];
+      // Optimize development build speed
+      config.optimization = {
+        ...config.optimization,
+        runtimeChunk: false,
+        minimize: false,
+        splitChunks: {
+          chunks: 'all',
+          cacheGroups: {
+            default: false,
+            vendors: false,
+            // Combine all node_modules into a single chunk
+            commons: {
+              name: 'commons',
+              chunks: 'all',
+              minChunks: 2,
+              reuseExistingChunk: true,
+            },
+          },
+        },
+      };
     }
     return config;
   },

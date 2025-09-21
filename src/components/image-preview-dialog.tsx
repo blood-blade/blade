@@ -28,11 +28,15 @@ function centerAspectCrop(
   mediaHeight: number,
   aspect: number,
 ): Crop {
+  // Calculate the minimum dimension to ensure the crop is centered and square
+  const minDimension = Math.min(mediaWidth, mediaHeight);
+  const cropWidth = (minDimension / mediaWidth) * 100; // Convert to percentage
+  
   return centerCrop(
     makeAspectCrop(
       {
         unit: '%',
-        width: 90,
+        width: cropWidth, // Use the calculated width
       },
       aspect,
       mediaWidth,
@@ -66,34 +70,38 @@ async function getCroppedCircularImage(
   // --- Avatar Cropping Logic ---
   // The following section implements the high-quality circular crop.
 
-  const scaleX = image.naturalWidth / image.width;
-  const scaleY = image.naturalHeight / image.height;
   const pixelRatio = window.devicePixelRatio || 1;
+  const desiredSize = 400; // Fixed size for avatars (400x400 pixels)
 
-  // The crop object uses percentages, so we calculate the source crop region in pixels.
+  // Calculate the source crop region in pixels
   const cropX = (crop.x / 100) * image.naturalWidth;
   const cropY = (crop.y / 100) * image.naturalHeight;
   const cropWidth = (crop.width / 100) * image.naturalWidth;
   const cropHeight = (crop.height / 100) * image.naturalHeight;
   
-  // Set canvas dimensions to the actual crop size, scaled for high DPI.
-  canvas.width = Math.floor(cropWidth * pixelRatio);
-  canvas.height = Math.floor(cropHeight * pixelRatio);
+  // Set canvas to our desired size, scaled for high DPI
+  canvas.width = desiredSize * pixelRatio;
+  canvas.height = desiredSize * pixelRatio;
 
+  // Scale everything for high DPI
   ctx.scale(pixelRatio, pixelRatio);
+  ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // Center the drawing within the canvas
-  const centerX = cropWidth / 2;
-  const centerY = cropHeight / 2;
-  const radius = Math.min(centerX, centerY);
-  
-  // Create a circular clipping path. Anything drawn after this will be confined to the circle.
+  // Center point and radius for our circle
+  const centerX = desiredSize / 2;
+  const centerY = desiredSize / 2;
+  const radius = desiredSize / 2;
+
+  // Create a circular clipping path
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI, false);
   ctx.clip();
 
-  // Draw the cropped portion of the source image onto the canvas.
+  // Clear the entire canvas first (important for transparency)
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw the cropped portion of the source image onto the canvas, scaling to fit our desired size
   ctx.drawImage(
     image,
     cropX,
@@ -102,8 +110,8 @@ async function getCroppedCircularImage(
     cropHeight,
     0,
     0,
-    cropWidth,
-    cropHeight
+    desiredSize,
+    desiredSize
   );
   
   // --- End of Avatar Cropping Logic ---
@@ -219,12 +227,21 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
                 onChange={c => setCrop(c)}
                 circularCrop
                 aspect={1}
+                minWidth={100}
+                minHeight={100}
+                keepSelection
+                className="max-w-full"
               >
                 <img
                   ref={imgRef}
                   src={previewUrl}
                   alt="Image preview"
-                  style={{ maxHeight: '50vh', display: 'block' }}
+                  style={{ 
+                    maxHeight: '50vh',
+                    maxWidth: '100%',
+                    display: 'block',
+                    margin: '0 auto'
+                  }}
                   onLoad={onImageLoad}
                 />
               </ReactCrop>
