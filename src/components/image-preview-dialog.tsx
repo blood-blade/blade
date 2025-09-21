@@ -265,15 +265,16 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
                   />
                 </ReactCrop>
               </div>
-              </ReactCrop>
             ) : (
-              <NextImage
-                src={previewUrl}
-                alt="Image preview"
-                width={500}
-                height={500}
-                style={{ objectFit: 'contain', maxHeight: '50vh', width: 'auto', height: 'auto' }}
-              />
+              previewUrl && (
+                <NextImage
+                  src={previewUrl}
+                  alt="Image preview"
+                  width={500}
+                  height={500}
+                  style={{ objectFit: 'contain', maxHeight: '50vh', width: 'auto', height: 'auto' }}
+                />
+              )
             )
           )}
           {isVideo && previewUrl && (

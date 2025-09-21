@@ -45,7 +45,7 @@ export function UserAvatar({ user, className, isFriend }: UserAvatarProps) {
             className="object-cover"
             style={{ 
               objectPosition: 'center center',
-              imageRendering: 'high-quality'
+              imageRendering: '-webkit-optimize-contrast'
             }}
           />
         ) : (
