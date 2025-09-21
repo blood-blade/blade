@@ -33,9 +33,15 @@ export function validateEnvironmentSecrets(): void {
 
   console.log(`🔍 Environment validation for ${config.nodeEnv} environment...`);
 
-  // Required in all environments
-  if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
-    errors.push('NEXT_PUBLIC_FIREBASE_PROJECT_ID is required');
+  // Require project id in production. In development allow a fallback but warn.
+  if (config.isProduction) {
+    if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
+      errors.push('NEXT_PUBLIC_FIREBASE_PROJECT_ID is required');
+    }
+  } else {
+    if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
+      warnings.push('NEXT_PUBLIC_FIREBASE_PROJECT_ID not set - using development fallback');
+    }
   }
 
   // Required for secure environments (production only)

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { sendEmailVerification, User } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 
@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/form';
 import { useToast } from '@/hooks/use-toast';
 import { Toaster } from '@/components/ui/toaster';
-import { sendEmail } from '@/utils/email-service';
+import { sendVerificationRequest, verifyEmailCode as verifyEmailCodeAPI } from '@/utils/email-service';
 
 const formSchema = z.object({
   code: z.string().min(6, { message: 'Verification code must be 6 digits.' }).max(6),
@@ -47,7 +47,10 @@ export default function VerifyEmailPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
-  const [verificationCode, setVerificationCode] = useState<string>('');
+  // user-typed input
+  const [verificationCodeInput, setVerificationCodeInput] = useState<string>('');
+  // store the sent code in a ref (not shown directly in the input)
+  const sentVerificationCodeRef = useRef<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>('');
 
   useEffect(() => {
@@ -66,7 +69,9 @@ export default function VerifyEmailPage() {
     }
     
     setUserEmail(email);
-    setVerificationCode(code);
+    // store the sent code in a ref so it isn't auto-typed into the input
+    sentVerificationCodeRef.current = code;
+    setVerificationCodeInput('');
   }, [searchParams, router, toast]);
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -76,50 +81,21 @@ export default function VerifyEmailPage() {
     },
   });
 
-  const sendVerificationEmail = async (email: string, code: string) => {
-    try {
-      await sendEmail({
-        to: email,
-        subject: 'Vibez - Email Verification Code',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="text-align: center; margin-bottom: 30px;">
-              <h1 style="color: #6366f1; margin: 0;">Vibez</h1>
-            </div>
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; text-align: center;">
-              <h2 style="margin: 0 0 20px 0;">Verify Your Email</h2>
-              <p style="margin: 0 0 30px 0; font-size: 16px;">Welcome to Vibez! Please use the verification code below to complete your registration:</p>
-              <div style="background: rgba(255,255,255,0.2); padding: 20px; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 20px 0;">
-                ${code}
-              </div>
-              <p style="margin: 20px 0 0 0; font-size: 14px; opacity: 0.9;">This code will expire in 10 minutes. If you didn't request this, please ignore this email.</p>
-            </div>
-          </div>
-        `,
-        text: `Welcome to Vibez! Your verification code is: ${code}\n\nThis code will expire in 10 minutes. If you didn't request this, please ignore this email.`,
-      });
-    } catch (error) {
-      console.error('Error sending verification email:', error);
-      throw error;
-    }
+  // Request the server to send a verification code to the given email
+  const sendVerificationEmail = async (email: string) => {
+    const success = await sendVerificationRequest(email);
+    if (!success) throw new Error('Failed to request verification code');
+    return true;
   };
 
   const resendCode = async () => {
     setResendLoading(true);
     try {
-      const newCode = generateVerificationCode();
-      await sendVerificationEmail(userEmail, newCode);
-      setVerificationCode(newCode);
-      
-      // Update URL with new code
-      const newUrl = new URL(window.location.href);
-      newUrl.searchParams.set('code', newCode);
-      window.history.replaceState({}, '', newUrl.toString());
-      
-      toast({
-        title: 'Code Sent',
-        description: 'A new verification code has been sent to your email.',
-      });
+      await sendVerificationEmail(userEmail);
+      // Clear input and keep sent code server-side
+      sentVerificationCodeRef.current = null;
+      setVerificationCodeInput('');
+      toast({ title: 'Code Sent', description: 'A new verification code has been sent to your email.' });
     } catch (error) {
       toast({
         title: 'Error',
@@ -132,40 +108,98 @@ export default function VerifyEmailPage() {
   };
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (loading) return; // Prevent double submission
     setLoading(true);
+    
     try {
-      if (values.code === verificationCode) {
-        // Verification successful - mark user as verified and redirect
+      // Try to verify the code
+      const result = await verifyEmailCodeAPI(userEmail, values.code);
+      
+      if (result.success) {
         const user = auth.currentUser;
         if (user) {
-          // Update user document to mark as verified
-          const userDocRef = doc(db, 'users', user.uid);
-          await updateDoc(userDocRef, {
-            emailVerified: true,
-            verifiedAt: new Date(),
+          try {
+            // First update the user document
+            const userDocRef = doc(db, 'users', user.uid);
+            await updateDoc(userDocRef, {
+              emailVerified: true,
+              verifiedAt: new Date(),
+            });
+            
+            // Then force reload the auth state to ensure it's up to date
+            await user.reload();
+            
+            // Then update the email verified flag in Firebase Auth
+            await user.updateProfile({
+              emailVerified: true
+            });
+            
+            // Show success message
+            toast({ 
+              title: 'Email Verified!', 
+              description: 'Your email has been successfully verified. Welcome to Vibez!' 
+            });
+            
+            // Force refresh the ID token to ensure all claims are up to date
+            await user.getIdToken(true);
+            
+            // Small delay to ensure all updates are processed
+            setTimeout(async () => {
+              try {
+                await user.reload();
+                router.push('/');
+              } catch (error) {
+                console.error('Error during final reload:', error);
+                // If there's an error, try direct navigation
+                window.location.href = '/';
+              }
+            }, 2000);
+            
+          } catch (dbError) {
+            console.error('Error updating verification status:', dbError);
+            toast({
+              title: 'Verification Issue',
+              description: 'Your email was verified but there was an issue updating your profile. Please try logging in again.',
+              variant: 'destructive',
+            });
+            
+            // If we can't update the profile, sign out and redirect to login
+            setTimeout(async () => {
+              await auth.signOut();
+              router.push('/login?message=Please sign in again to complete verification');
+            }, 2000);
+          }
+        } else {
+          toast({
+            title: 'Auth State Error',
+            description: 'Please sign in again to complete verification.',
+            variant: 'destructive',
           });
+          router.push('/login');
         }
-        
-        toast({
-          title: 'Email Verified!',
-          description: 'Your email has been successfully verified. Welcome to Vibez!',
-        });
-        
-        // Redirect to main app
-        router.push('/');
       } else {
-        toast({
-          title: 'Invalid Code',
-          description: 'The verification code is incorrect. Please try again.',
-          variant: 'destructive',
+        // Invalid code response with specific message from server
+        toast({ 
+          title: 'Verification Failed', 
+          description: result.message || 'The verification code is incorrect or has expired. Please try again or request a new code.',
+          variant: 'destructive' 
         });
+        
+        // Clear the input field for retry
+        setVerificationCodeInput('');
+        form.reset();
       }
     } catch (error) {
+      console.error('Verification error:', error);
       toast({
         title: 'Verification Failed',
-        description: 'Something went wrong. Please try again.',
+        description: error instanceof Error ? error.message : 'Unable to verify code. Please try again or request a new code.',
         variant: 'destructive',
       });
+      
+      // Clear the input field
+      setVerificationCodeInput('');
+      form.reset();
     } finally {
       setLoading(false);
     }
@@ -196,9 +230,10 @@ export default function VerifyEmailPage() {
                         maxLength={6}
                         className="text-center text-2xl font-mono tracking-widest"
                         {...field}
+                        value={verificationCodeInput}
                         onChange={(e) => {
-                          // Only allow numbers and limit to 6 digits
                           const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                          setVerificationCodeInput(value);
                           field.onChange(value);
                         }}
                       />
@@ -211,10 +246,19 @@ export default function VerifyEmailPage() {
             <CardFooter className="flex flex-col space-y-4">
               <Button 
                 type="submit" 
-                className="w-full" 
+                className="w-full relative" 
                 disabled={loading || form.watch('code').length !== 6}
               >
-                {loading ? 'Verifying...' : 'Verify Email'}
+                {loading ? (
+                  <>
+                    <span className="opacity-0">Verify Email</span>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="h-5 w-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                    </div>
+                  </>
+                ) : (
+                  'Verify Email'
+                )}
               </Button>
               
               <div className="text-center space-y-2">

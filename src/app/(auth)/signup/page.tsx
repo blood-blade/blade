@@ -4,16 +4,15 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCreateUserWithEmailAndPassword, useUpdateProfile, useSignInWithGoogle } from 'react-firebase-hooks/auth';
-import { doc, setDoc, serverTimestamp, collection, updateDoc, getDoc } from 'firebase/firestore';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { GoogleAuthProvider, signInWithPopup, updateProfile as updateFirebaseProfile } from 'firebase/auth';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import React, { useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 
 import { auth, db } from '@/lib/firebase';
-import { sendVerificationEmail, verifyEmailCode } from '@/utils/email-service';
+import { sendVerificationRequest, verifyEmailCode } from '@/utils/email-service';
 import { registerDeviceSecurely } from '@/utils/device-auth';
 import { Button } from '@/components/ui/button';
 import {
@@ -51,12 +50,11 @@ export default function SignupPage() {
   const { toast } = useToast();
   const [createUserWithEmailAndPassword, , loading] =
     useCreateUserWithEmailAndPassword(auth);
-  const [updateProfile] = useUpdateProfile(auth);
   const [signInWithGoogle, , googleLoading] = useSignInWithGoogle(auth);
   
   // Email verification states
   const [showVerification, setShowVerification] = useState(false);
-  const [verificationCode, setVerificationCode] = useState('');
+  const [verificationCodeInput, setVerificationCodeInput] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
@@ -74,135 +72,156 @@ export default function SignupPage() {
   const handleSendVerificationCode = async (email: string) => {
     setIsSendingCode(true);
     try {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const success = await sendVerificationEmail(email, code);
+      const success = await sendVerificationRequest(email);
+      // Regardless of exact delivery success, show the verification UI (keeps UX consistent)
+      setVerificationEmail(email);
+      setVerificationCodeInput('');
+      setShowVerification(true);
+
       if (success) {
-        setVerificationEmail(email);
-        setVerificationCode(code);
-        setShowVerification(true);
-        
-        toast({
-          title: 'Verification code sent',
-          description: 'Please check your email for the verification code.',
-        });
+        toast({ title: 'Verification code sent', description: 'Please check your email for the verification code.' });
       } else {
-        // Show success message even if email fails (simulated send)
-        toast({
-          title: 'Verification code sent',
-          description: 'Please check your email for the verification code.',
-        });
-        setVerificationEmail(email);
-        setShowVerification(true);
+        toast({ title: 'Verification queued', description: 'Verification requested — check your email shortly.' });
       }
     } catch (error) {
       console.error('Error sending verification code:', error);
-      // Show success message for development
-      toast({
-        title: 'Verification code sent',
-        description: 'Please check your email for the verification code.',
-      });
-      setVerificationEmail(email);
-      setShowVerification(true);
+      toast({ title: 'Error', description: 'Failed to request verification code. Please try again.', variant: 'destructive' });
     } finally {
       setIsSendingCode(false);
     }
   };
 
   const handleVerifyCode = async () => {
-    if (!verificationCode.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please enter the verification code.',
-        variant: 'destructive',
-      });
+    if (!verificationCodeInput.trim()) {
+      toast({ title: 'Error', description: 'Please enter the verification code.', variant: 'destructive' });
       return;
     }
 
     setIsVerifying(true);
     try {
-      const isValid = await verifyEmailCode(verificationEmail, verificationCode);
-      if (isValid) {
-        // Code is valid, proceed with account creation
-        const formData = form.getValues();
-        await createAccountAfterVerification(formData);
-      } else {
-        toast({
-          title: 'Invalid code',
-          description: 'The verification code is incorrect or has expired. Please try again.',
-          variant: 'destructive',
+      // Get form data before verification
+      const formData = form.getValues();
+      console.log('Form data:', { email: verificationEmail, name: formData.name });
+      
+      // Verify the code first
+      const result = await verifyEmailCode(verificationEmail, verificationCodeInput);
+      console.log('Verification result:', result);
+      
+      if (!result.success) {
+        toast({ 
+          title: 'Invalid code', 
+          description: result.message || 'The verification code is incorrect or has expired. Please try again.', 
+          variant: 'destructive' 
         });
-        setIsVerifying(false);
+        // Clear the input for retry
+        setVerificationCodeInput('');
+        return;
       }
-    } catch (error) {
-      console.error('Error verifying code:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to verify code. Please try again.',
-        variant: 'destructive',
-      });
-      setIsVerifying(false);
-    }
-  };
 
-  const createAccountAfterVerification = async (values: z.infer<typeof formSchema>) => {
-    try {
-      const userCredential = await createUserWithEmailAndPassword(verificationEmail, values.password);
-      if (userCredential) {
-        await updateProfile({ displayName: values.name });
-        
-        // Create user document first (without devices - handled securely by device API)
-        const userDocRef = doc(db, 'users', userCredential.user.uid);
-        await setDoc(userDocRef, {
-          uid: userCredential.user.uid,
-          name: values.name,
-          email: verificationEmail,
-          photoURL: null,
-          status: 'online',
-          about: '',
-          devices: [], // Will be populated by secure device registration
-          background: 'galaxy',
-          useCustomBackground: true,
-          friends: [],
-          friendRequestsSent: [],
-          friendRequestsReceived: [],
-          blockedUsers: [],
-          mutedConversations: [],
-          emailVerified: true,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      console.log('Creating account with:', verificationEmail);
+      // Create the account first
+      const userCredential = await createUserWithEmailAndPassword(
+        verificationEmail, 
+        formData.password
+      );
+      
+      console.log('User credential:', userCredential);
+      
+      if (!userCredential?.user) {
+        console.error('No user credential returned');
+        throw new Error('Account creation failed - no user returned');
+      }
 
-        // Register device securely after user creation
-        const deviceResult = await registerDeviceSecurely(userCredential.user);
-        if (!deviceResult.success) {
-          console.warn('Device registration failed:', deviceResult.error);
-          // Continue anyway - device registration failure shouldn't block login
+      // Update profile with retries
+      let profileUpdateRetries = 3;
+      while (profileUpdateRetries > 0) {
+        try {
+          await updateFirebaseProfile(userCredential.user, { 
+            displayName: formData.name 
+          });
+          break;
+        } catch (profileError) {
+          console.error('Profile update attempt failed:', profileError);
+          profileUpdateRetries--;
+          if (profileUpdateRetries === 0) throw profileError;
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
-
-        toast({
-          title: 'Account created successfully!',
-          description: 'Welcome to Vibez. You are now logged in.',
-        });
-
-        router.push('/');
       }
+      
+      // Create user document
+      const userDocRef = doc(db, 'users', userCredential.user.uid);
+      await setDoc(userDocRef, {
+        uid: userCredential.user.uid,
+        name: formData.name,
+        email: verificationEmail,
+        photoURL: null,
+        status: 'online',
+        about: '',
+        devices: [],
+        background: 'galaxy',
+        useCustomBackground: true,
+        friends: [],
+        friendRequestsSent: [],
+        friendRequestsReceived: [],
+        blockedUsers: [],
+        mutedConversations: [],
+        emailVerified: true,
+        verifiedAt: new Date(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // Force token refresh with retries
+      let tokenRetries = 3;
+      while (tokenRetries > 0) {
+        try {
+          await userCredential.user.reload();
+          await userCredential.user.getIdToken(true);
+          break;
+        } catch (tokenError) {
+          console.error('Token refresh attempt failed:', tokenError);
+          tokenRetries--;
+          if (tokenRetries === 0) throw tokenError;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      toast({
+        title: 'Account created!',
+        description: 'Your account has been created and verified successfully.'
+      });
+
+      // Small delay to ensure everything is updated
+      setTimeout(() => {
+        router.push('/');
+      }, 2000);
+
     } catch (error: any) {
-      console.error('Error creating account:', error);
-      let errorMessage = 'Failed to create account. Please try again.';
+      console.error('Error during verification/signup:', error);
+      let errorMessage = 'Failed to verify code or create account.';
+      
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'An account with this email already exists.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'The email address is not valid.';
       } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Password is too weak. Please choose a stronger password.';
+        errorMessage = 'The password is too weak. Please choose a stronger password.';
       }
+      
       toast({
         title: 'Error',
         description: errorMessage,
-        variant: 'destructive',
+        variant: 'destructive'
       });
+      
+      // Clear verification input on error
+      setVerificationCodeInput('');
     } finally {
       setIsVerifying(false);
     }
   };
+
+  // Function removed as its functionality is now in handleVerifyCode
 
   const handleGoogleSignup = async () => {
     try {
@@ -314,11 +333,11 @@ export default function SignupPage() {
                 autoCapitalize="off"
                 spellCheck="false"
                 placeholder="000000"
-                value={verificationCode}
+                  value={verificationCodeInput}
                 onChange={(e) => {
                   // Only allow numbers
                   const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                  setVerificationCode(value);
+                  setVerificationCodeInput(value);
                 }}
                 disabled={isVerifying}
                 maxLength={6}
@@ -326,9 +345,9 @@ export default function SignupPage() {
               />
             </div>
             
-            <Button 
+              <Button 
               onClick={handleVerifyCode} 
-              disabled={isVerifying || !verificationCode.trim()}
+              disabled={isVerifying || !verificationCodeInput.trim()}
               className="w-full"
             >
               {isVerifying ? 'Verifying...' : 'Verify Email'}

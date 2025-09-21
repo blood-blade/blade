@@ -170,12 +170,15 @@ async function sendPasswordResetEmail(email: string): Promise<{ success: boolean
   }
 }
 
-async function verifyCode(email: string, code: string): Promise<boolean> {
+async function verifyCode(email: string, code: string): Promise<{ success: boolean; message?: string }> {
   try {
     const record = verificationStore.get(email);
     
     if (!record) {
-      return false;
+      return { 
+        success: false, 
+        message: 'No verification code found. Please request a new code.'
+      };
     }
 
     const { code: storedCode, expiresAt, attempts } = record;
@@ -183,29 +186,44 @@ async function verifyCode(email: string, code: string): Promise<boolean> {
     // Check if expired
     if (Date.now() > expiresAt) {
       verificationStore.delete(email);
-      return false;
+      return { 
+        success: false, 
+        message: 'Verification code has expired. Please request a new code.'
+      };
     }
 
     // Check attempts (rate limiting)
     if (attempts >= 5) {
       verificationStore.delete(email);
-      return false;
+      return { 
+        success: false, 
+        message: 'Too many attempts. Please request a new code.'
+      };
     }
 
     // Verify the code
     if (code === storedCode) {
       // Code is correct, delete the verification record
       verificationStore.delete(email);
-      return true;
+      return { 
+        success: true, 
+        message: 'Code verified successfully.'
+      };
     } else {
       // Increment attempts
       record.attempts += 1;
       verificationStore.set(email, record);
-      return false;
+      return { 
+        success: false, 
+        message: `Invalid code. ${5 - record.attempts} attempts remaining.`
+      };
     }
   } catch (error) {
     console.error('Error verifying code:', error);
-    return false;
+    return { 
+      success: false, 
+      message: 'An error occurred while verifying the code.'
+    };
   }
 }
 
@@ -254,9 +272,12 @@ export async function POST(request: NextRequest) {
       }
 
       const { email, code } = parseResult.data;
-      const isValid = await verifyCode(email, code);
+      const result = await verifyCode(email, code);
       
-      return NextResponse.json({ success: isValid });
+      return NextResponse.json({
+        success: result.success,
+        message: result.message
+      });
     }
 
     if (action === 'reset-password') {
