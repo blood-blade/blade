@@ -844,25 +844,136 @@ useEffect(() => {
   ) => {
     if (!selectedChat || !currentUser) return;
     
-    if (action === 'delete') {
+      if (action === 'delete') {
       const messageToDelete = messages.find(m => m.id === messageId || m.clientTempId === messageId);
       if (!messageToDelete) return;
       
       const messageRef = doc(db, 'conversations', selectedChat.id, 'messages', messageToDelete.id);
+      const chatRef = doc(db, 'conversations', selectedChat.id);
+
+      // Optimistically update the UI immediately
+      setMessages(prevMessages => prevMessages.map(msg => {
+        if (msg.id === messageId || msg.clientTempId === messageId) {
+          return {
+            ...msg,
+            deleted: true,
+            text: 'This message was deleted.',
+            file: null,
+            reactions: []
+          };
+        }
+        return msg;
+      }));
+      
       try {
-        await updateDoc(messageRef, {
+        const batch = writeBatch(db);
+        
+        // Prepare update data without any undefined values
+        const updateData: Record<string, any> = {
+          deleted: true,
           text: 'This message was deleted.',
           file: null,
-          deleted: true,
-          reactions: []
-        });
+          reactions: [],
+          senderId: messageToDelete.senderId,
+          timestamp: messageToDelete.timestamp
+        };
+
+        // Only include fields that exist in the original message
+        if (messageToDelete.replyTo) {
+          updateData.replyTo = messageToDelete.replyTo;
+        }
+        
+        // Update the message to be deleted
+        batch.update(messageRef, updateData);
+
+        // If this was the last message, find the previous message to update lastMessage
+        if (selectedChat.lastMessage?.timestamp?.toMillis() === messageToDelete.timestamp?.toMillis()) {
+          // Optimistically update the conversation's last message
+          setConversations(prevConvos => prevConvos.map(conv => {
+            if (conv.id === selectedChat.id) {
+              return {
+                ...conv,
+                lastMessage: {
+                  text: 'This message was deleted',
+                  senderId: messageToDelete.senderId,
+                  timestamp: messageToDelete.timestamp
+                }
+              };
+            }
+            return conv;
+          }));
+
+          const messagesQuery = query(
+            collection(db, 'conversations', selectedChat.id, 'messages'),
+            orderBy('timestamp', 'desc'),
+            where('deleted', '!=', true),
+            limit(1)
+          );
+          
+          const previousMessages = await getDocs(messagesQuery);
+          
+          if (!previousMessages.empty) {
+            const previousMessage = previousMessages.docs[0].data();
+            batch.update(chatRef, {
+              lastMessage: {
+                text: previousMessage.text || '',
+                senderId: previousMessage.senderId,
+                timestamp: previousMessage.timestamp
+              }
+            });
+
+            // Update the UI with the actual previous message
+            setConversations(prevConvos => prevConvos.map(conv => {
+              if (conv.id === selectedChat.id) {
+                return {
+                  ...conv,
+                  lastMessage: {
+                    text: previousMessage.text || '',
+                    senderId: previousMessage.senderId,
+                    timestamp: previousMessage.timestamp
+                  }
+                };
+              }
+              return conv;
+            }));
+          } else {
+            // If no previous messages exist, clear the lastMessage
+            batch.update(chatRef, {
+              lastMessage: null
+            });
+
+            // Update UI to reflect no last message
+            setConversations(prevConvos => prevConvos.map(conv => {
+              if (conv.id === selectedChat.id) {
+                return {
+                  ...conv,
+                  lastMessage: null
+                };
+              }
+              return conv;
+            }));
+          }
+        }
+
+        await batch.commit();
       } catch (error) {
         console.error("Error deleting message", error);
+        toast({
+          title: "Error",
+          description: "Could not delete the message. Please try again.",
+          variant: "destructive",
+        });
+        
+        // Revert optimistic updates on error
+        setMessages(prevMessages => prevMessages.map(msg => {
+          if (msg.id === messageId) {
+            return messageToDelete;
+          }
+          return msg;
+        }));
       }
       return;
-    }
-
-    if (action === 'react') {
+    }    if (action === 'react') {
       const emoji = data;
       
       setMessages(prevMessages => prevMessages.map(msg => {

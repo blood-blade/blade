@@ -50,10 +50,12 @@ function MessageBubble({ message, sender, isCurrentUser, progress, onCancelUploa
   }
   
   const getReadReceiptIcon = () => {
-    if (message.status === 'sending') return <Clock className="h-4 w-4 text-primary-foreground/70" />;
-    if (isRead) return <CheckCheck className="h-4 w-4 text-blue-400" />;
-    if (message.status === 'sent' || message.status === 'delivered' || message.status === 'read') return <CheckCheck className="h-4 w-4 text-primary-foreground/70" />;
-    return <Check className="h-4 w-4 text-primary-foreground/70" />;
+    // Only show clock if explicitly in sending state and no timestamp exists
+    if (message.status === 'sending' && !message.timestamp) return <Clock className="h-4 w-4 text-primary-foreground/70" />;
+    if (message.status === 'read' || isRead) return <CheckCheck className="h-4 w-4 text-blue-400" />;
+    if (message.status === 'delivered') return <CheckCheck className="h-4 w-4 text-primary-foreground/70" />;
+    if (message.timestamp) return <Check className="h-4 w-4 text-primary-foreground/70" />;
+    return null; // Return nothing if we're not sure of the state
   }
 
 
@@ -289,11 +291,17 @@ function MessageBubble({ message, sender, isCurrentUser, progress, onCancelUploa
         
         {hasContent && !message.deleted && <MessageActions />}
 
-        <div className="mt-1 flex items-center gap-2 self-end px-2">
-          <p className={cn('text-xs', isCurrentUser ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+        <div className={cn(
+          "mt-1 flex items-center gap-1.5 self-end px-2",
+          message.reactions && message.reactions.length > 0 && "mb-4"
+        )}>
+          {isCurrentUser && getReadReceiptIcon()}
+          <p className={cn(
+            'text-xs',
+            isCurrentUser ? 'text-primary-foreground/70' : 'text-muted-foreground'
+          )}>
             {formattedTimestamp}
           </p>
-          {isCurrentUser && getReadReceiptIcon()}
         </div>
       </div>
     </motion.div>

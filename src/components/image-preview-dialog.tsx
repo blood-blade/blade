@@ -1,5 +1,5 @@
-'use client';
-import { useState, useEffect, useRef } from 'react';
+"use client";
+import React, { useState, useEffect, useRef } from "react";
 import NextImage from 'next/image';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -9,110 +9,33 @@ import { useToast } from '@/hooks/use-toast';
 import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
-interface ImagePreviewDialogProps {
-  file: File;
-  onSend: (file: File, message: string) => Promise<any>;
-  onCancel: () => void;
-  mode: 'chat' | 'story' | 'avatar';
-}
-
-/**
- * Creates a centered, aspect-ratio-constrained crop rectangle.
- * @param mediaWidth The width of the media element.
- * @param mediaHeight The height of the media element.
- * @param aspect The desired aspect ratio.
- * @returns A Crop object.
- */
-function centerAspectCrop(
-  mediaWidth: number,
-  mediaHeight: number,
-  aspect: number,
-): Crop {
-  // For square aspect ratio (avatar)
-  if (aspect === 1) {
-    const size = Math.min(mediaWidth, mediaHeight);
-    const x = (mediaWidth - size) / 2;
-    const y = (mediaHeight - size) / 2;
-    
-    return {
-      unit: '%',
-      x: (x / mediaWidth) * 100,
-      y: (y / mediaHeight) * 100,
-      width: (size / mediaWidth) * 100,
-      height: (size / mediaHeight) * 100,
-    };
-  }
-  
-  // For other aspect ratios, use the original centerCrop
-  return centerCrop(
-    makeAspectCrop(
-      {
-        unit: '%',
-        width: 90,
-      },
-      aspect,
-      mediaWidth,
-      mediaHeight,
-    ),
-    mediaWidth,
-    mediaHeight,
-  );
-}
-
-/**
- * Generates a cropped, circular image from a source image and a crop object.
- * This function correctly handles image scaling and device pixel ratio for high-quality output.
- * @param image The source HTMLImageElement.
- * @param crop The crop parameters from ReactCrop (in percentages).
- * @param fileName The desired filename for the output file.
- * @returns A promise that resolves with the cropped image as a File object.
- */
-async function getCroppedCircularImage(
-  image: HTMLImageElement,
-  crop: Crop,
-  fileName: string
-): Promise<File> {
+async function getCroppedCircularImage(image: HTMLImageElement, crop: Crop, fileName: string): Promise<File> {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('No 2d context');
 
-  if (!ctx) {
-    throw new Error('Canvas context is not available');
-  }
+  // Set fixed size for the output avatar
+  const size = 400;
+  canvas.width = size;
+  canvas.height = size;
 
-  // --- Avatar Cropping Logic ---
-  const pixelRatio = window.devicePixelRatio || 1;
-  const desiredSize = 400; // Fixed size for avatars (400x400 pixels)
-  
-  // Set up the canvas for high-quality output
-  canvas.width = desiredSize * pixelRatio;
-  canvas.height = desiredSize * pixelRatio;
-  
-  // Enable high-quality image processing
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // Calculate the crop region in original image coordinates
-  const sourceX = Math.round((crop.x / 100) * image.naturalWidth);
-  const sourceY = Math.round((crop.y / 100) * image.naturalHeight);
-  const sourceWidth = Math.round((crop.width / 100) * image.naturalWidth);
-  const sourceHeight = Math.round((crop.height / 100) * image.naturalHeight);
+  // Convert crop coordinates from pixels to actual image dimensions
+  const scaleX = image.naturalWidth / image.width;
+  const scaleY = image.naturalHeight / image.height;
 
-  // Calculate the drawing dimensions
-  const outputSize = desiredSize * pixelRatio;
-  const centerX = outputSize / 2;
-  const centerY = outputSize / 2;
-  const radius = outputSize / 2;
+  const sourceX = crop.x * scaleX;
+  const sourceY = crop.y * scaleY;
+  const sourceWidth = crop.width * scaleX;
+  const sourceHeight = crop.height * scaleY;
 
-  // Create a circular clipping path
+  // Create circular clipping path
   ctx.save();
   ctx.beginPath();
-  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2, true);
-  ctx.closePath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2, false);
   ctx.clip();
-
-  // Fill with transparent background
-  ctx.fillStyle = 'rgba(0,0,0,0)';
-  ctx.fillRect(0, 0, outputSize, outputSize);
 
   // Draw the image
   ctx.drawImage(
@@ -123,37 +46,35 @@ async function getCroppedCircularImage(
     sourceHeight,
     0,
     0,
-    outputSize,
-    outputSize
+    size,
+    size
   );
 
-  // Restore the context
   ctx.restore();
-  
-  // --- End of Avatar Cropping Logic ---
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('Canvas is empty'));
-        return;
-      }
-      // Resolve with a new File object. Using PNG to preserve transparency outside the circle.
+      if (!blob) throw new Error('Canvas is empty');
       resolve(new File([blob], fileName, { type: 'image/png' }));
-    }, 'image/png', 1); // Use PNG for transparency and high quality.
+    }, 'image/png');
   });
 }
 
+interface ImagePreviewDialogProps {
+  file: File;
+  onSend: (file: File, message: string) => Promise<any>;
+  onCancel: () => void;
+  mode: 'chat' | 'story' | 'avatar';
+}
 
 export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePreviewDialogProps) {
   const [message, setMessage] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const { toast } = useToast();
-
-  const [crop, setCrop] = useState<Crop>();
+  const [crop, setCrop] = useState<Crop | undefined>(undefined);
+  const percentCropRef = useRef<Crop | undefined>(undefined);
   const imgRef = useRef<HTMLImageElement | null>(null);
-  // Track whether we've set the initial crop for the current image to avoid overwriting user changes
   const initialCropSet = useRef(false);
 
   useEffect(() => {
@@ -162,78 +83,71 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
       return;
     }
     const url = URL.createObjectURL(file);
-    // Reset preview URL and initial-crop flag so a new image starts fresh
     setPreviewUrl(url);
     initialCropSet.current = false;
     setCrop(undefined);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
+    return () => URL.revokeObjectURL(url);
   }, [file, onCancel]);
 
-  /**
-   * When an image loads, automatically set a centered square crop if in 'avatar' mode.
-   */
   const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     imgRef.current = e.currentTarget;
-    if (mode === 'avatar') {
-      // Only set the initial centered crop if we haven't done so for this image.
-      if (!initialCropSet.current) {
-        // Use natural dimensions for a more accurate initial crop calculation
-        const { naturalWidth, naturalHeight } = e.currentTarget;
-        setCrop(centerAspectCrop(naturalWidth, naturalHeight, 1));
-        initialCropSet.current = true;
-      }
+    if (mode === 'avatar' && !initialCropSet.current) {
+      const { width, height } = e.currentTarget;
+      
+      // Use 80% of the smallest dimension for initial crop
+      const cropSize = Math.min(width, height) * 0.8;
+      
+      // Center the crop
+      const x = (width - cropSize) / 2;
+      const y = (height - cropSize) / 2;
+      
+      setCrop({
+        unit: 'px',
+        x,
+        y,
+        width: cropSize,
+        height: cropSize
+      });
+      
+      initialCropSet.current = true;
     }
   };
 
-  // Normalize crop updates (ReactCrop may use different units) and prevent overwriting
   const handleCropChange = (c: Crop) => {
-    // ReactCrop sometimes returns pixel-based crop (unit === 'px'). Our
-    // downstream code expects percentages. If we have pixel units and the
-    // image is loaded, convert to percentages using natural dimensions.
-    const incomingUnit = (c as any).unit || '%';
-    if (incomingUnit === 'px' && imgRef.current) {
-      const iw = imgRef.current.naturalWidth || imgRef.current.width;
-      const ih = imgRef.current.naturalHeight || imgRef.current.height;
-      const pxX = (c.x as number) || 0;
-      const pxY = (c.y as number) || 0;
-      const pxW = (c.width as number) || 0;
-      const pxH = (c.height as number) || 0;
+    if (!imgRef.current) return;
+    const { width: imgWidth, height: imgHeight } = imgRef.current;
+    
+    // Set minimum and maximum sizes in pixels
+    const minSize = 50;
+    const maxSize = Math.min(imgWidth, imgHeight, 300);
+    
+    const newCrop = {
+      unit: 'px',
+      width: Math.min(Math.max(c.width || minSize, minSize), maxSize),
+      height: Math.min(Math.max(c.height || minSize, minSize), maxSize),
+      x: Math.max(0, Math.min(c.x || 0, imgWidth - (c.width || 0))),
+      y: Math.max(0, Math.min(c.y || 0, imgHeight - (c.height || 0)))
+    };
+    
+    setCrop(newCrop);
+  };
 
-      const normalized: Crop = {
-        unit: '%',
-        x: (pxX / iw) * 100,
-        y: (pxY / ih) * 100,
-        width: (pxW / iw) * 100,
-        height: (pxH / ih) * 100,
-      };
-      setCrop(normalized);
-      return;
-    }
-
-    // Otherwise store as-percent (or whatever unit is provided)
-    const unit = (c as any).unit || '%';
-    const normalized = { ...c, unit } as Crop;
-    setCrop(normalized);
+  const handleCropComplete = (c: Crop) => {
+    if (!imgRef.current || !c.width || !c.height) return;
+    percentCropRef.current = c;
   };
 
   const handleSend = async () => {
     setIsSending(true);
-
-    let fileToSend = file;
-
     try {
-      // --- File Generation Logic ---
-      // If in avatar mode, generate the cropped file before sending.
-      if (mode === 'avatar' && imgRef.current && crop?.width && crop?.height) {
-        fileToSend = await getCroppedCircularImage(imgRef.current, crop, 'avatar.png');
+      let fileToSend = file;
+      if (mode === 'avatar' && imgRef.current) {
+        const percentCrop = percentCropRef.current;
+        if (percentCrop && percentCrop.width && percentCrop.height) {
+          fileToSend = await getCroppedCircularImage(imgRef.current, percentCrop, 'avatar.png');
+        }
       }
-      // For 'chat' and 'story' modes, fileToSend remains the original file.
-      
       await onSend(fileToSend, message);
-
     } catch (error) {
       console.error('Image upload/crop failed:', error);
       toast({
@@ -252,74 +166,71 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
   const isImage = file.type.startsWith('image/');
   const isVideo = file.type.startsWith('video/');
 
-  const getTitle = () => {
-    switch (mode) {
-      case 'story': return "Post a Story";
-      case 'avatar': return "Set New Avatar";
-      default: return "Send File";
-    }
-  }
-
-  const getButtonText = () => {
-    switch (mode) {
-      case 'story': return "Post Story";
-      case 'avatar': return "Set as Avatar";
-      default: return "Send";
-    }
-  }
-
   return (
     <Dialog open={true} onOpenChange={(isOpen) => !isOpen && onCancel()}>
       <DialogContent className="max-w-lg w-full">
         <DialogHeader>
-          <DialogTitle>{getTitle()}</DialogTitle>
+          <DialogTitle>
+            {mode === 'story' ? "Post a Story" : mode === 'avatar' ? "Set New Avatar" : "Send File"}
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center justify-center p-4 bg-muted/30 rounded-lg max-h-[50vh] min-h-[200px]">
-          {isImage && previewUrl && (
+        <div className="flex items-center justify-center p-4 bg-muted/30 rounded-lg max-h-[50vh] min-h-[200px] overflow-hidden">
+          {isImage && previewUrl ? (
             mode === 'avatar' ? (
-              <div className="relative max-w-full mx-auto" style={{ maxHeight: '50vh' }}>
-                <ReactCrop
-                  crop={crop}
-                  onChange={handleCropChange}
-                  circularCrop
-                  aspect={1}
-                  minWidth={100}
-                  minHeight={100}
-                  keepSelection
-                  className="max-h-full"
-                >
-                  <img
-                    ref={imgRef}
-                    src={previewUrl}
-                    alt="Image preview"
-                    style={{ 
-                      maxHeight: '50vh',
-                      width: 'auto',
-                      height: 'auto',
-                      display: 'block',
-                      margin: '0 auto',
-                      objectFit: 'contain'
-                    }}
-                    onLoad={onImageLoad}
-                  />
-                </ReactCrop>
+              <div className="relative w-full h-full flex items-center justify-center">
+                <div style={{ 
+                  maxWidth: '500px',
+                  width: '100%',
+                  maxHeight: '50vh',
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}>
+                  <ReactCrop
+                    crop={crop}
+                    onChange={handleCropChange}
+                    onComplete={handleCropComplete}
+                    aspect={1}
+                    circularCrop
+                    minWidth={50}
+                    minHeight={50}
+                    maxWidth={300}
+                    maxHeight={300}
+                    keepSelection
+                    ruleOfThirds
+                    className="max-w-full"
+                  >
+                    <img
+                      ref={imgRef}
+                      src={previewUrl}
+                      alt="Image preview"
+                      style={{ 
+                        maxHeight: '50vh',
+                        width: '100%',
+                        objectFit: 'contain',
+                        display: 'block'
+                      }}
+                      onLoad={onImageLoad}
+                      draggable={false}
+                    />
+                  </ReactCrop>
+                </div>
               </div>
             ) : (
-              previewUrl && (
-                <NextImage
-                  src={previewUrl}
-                  alt="Image preview"
-                  width={500}
-                  height={500}
-                  style={{ objectFit: 'contain', maxHeight: '50vh', width: 'auto', height: 'auto' }}
-                />
-              )
+              <NextImage
+                src={previewUrl}
+                alt="Image preview"
+                width={500}
+                height={500}
+                style={{ objectFit: 'contain', maxHeight: '50vh', width: 'auto', height: 'auto' }}
+              />
             )
-          )}
+          ) : null}
+          
           {isVideo && previewUrl && (
-              <video src={previewUrl} controls className="max-h-[50vh] rounded-lg" />
+            <video src={previewUrl} controls className="max-h-[50vh] rounded-lg" />
           )}
+          
           {!isImage && !isVideo && (
             <div className="flex flex-col items-center gap-4 text-muted-foreground">
               <FileIcon className="w-16 h-16"/>
@@ -329,15 +240,15 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
           )}
         </div>
 
-        {mode !== 'avatar' && (
+        {mode !== 'avatar' ? (
           <div className="relative">
             <Textarea
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setMessage(e.target.value)}
               placeholder={mode === 'story' ? 'Add a caption...' : 'Add a message...'}
               className="pr-20"
               rows={1}
-              onKeyDown={(e) => {
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
@@ -345,7 +256,7 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
               }}
             />
           </div>
-        )}
+        ) : null}
 
         <DialogFooter className="mt-2">
           <Button variant="outline" onClick={onCancel} disabled={isSending}>
@@ -353,7 +264,7 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
           </Button>
           <Button onClick={handleSend} disabled={isSending}>
             {isSending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {isSending ? 'Sending...' : getButtonText()}
+            {isSending ? 'Sending...' : mode === 'story' ? 'Post Story' : mode === 'avatar' ? 'Set as Avatar' : 'Send'}
           </Button>
         </DialogFooter>
       </DialogContent>
