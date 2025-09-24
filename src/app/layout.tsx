@@ -48,12 +48,7 @@ export const metadata: Metadata = {
     statusBarStyle: 'default',
     title: 'Vibez'
   },
-  applicationName: 'Vibez',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#000000' }
-  ],
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1'
+  applicationName: 'Vibez'
 };
 
 export const viewport: Viewport = {
@@ -62,6 +57,10 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' }
+  ]
 };
 
 // Validate environment at app startup

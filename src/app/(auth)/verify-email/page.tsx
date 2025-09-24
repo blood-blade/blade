@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import React, { useState, useEffect, useRef } from 'react';
 import { sendEmailVerification, User } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 import { auth, db } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
@@ -54,24 +54,37 @@ export default function VerifyEmailPage() {
   const [userEmail, setUserEmail] = useState<string>('');
 
   useEffect(() => {
-    // Get email and verification code from URL params (passed from signup)
+    // Get email from URL params
     const email = searchParams.get('email');
-    const code = searchParams.get('code');
     
-    if (!email || !code) {
+    if (!email) {
       toast({
         title: 'Error',
-        description: 'Missing verification information. Please sign up again.',
+        description: 'Missing email information. Please try logging in again.',
         variant: 'destructive',
       });
-      router.push('/signup');
+      router.push('/login');
       return;
     }
     
     setUserEmail(email);
-    // store the sent code in a ref so it isn't auto-typed into the input
-    sentVerificationCodeRef.current = code;
-    setVerificationCodeInput('');
+
+    // Automatically send verification code when page loads
+    sendVerificationEmail(email)
+      .then(() => {
+        toast({
+          title: 'Verification Code Sent',
+          description: 'Please check your email for the verification code.',
+        });
+      })
+      .catch(error => {
+        console.error('Error sending initial verification code:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to send verification code. Please try again or contact support.',
+          variant: 'destructive',
+        });
+      });
   }, [searchParams, router, toast]);
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -83,6 +96,15 @@ export default function VerifyEmailPage() {
 
   // Request the server to send a verification code to the given email
   const sendVerificationEmail = async (email: string) => {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('No authenticated user found');
+    }
+    
+    if (user.email !== email) {
+      throw new Error('Email mismatch. Please try logging in again.');
+    }
+
     const success = await sendVerificationRequest(email);
     if (!success) throw new Error('Failed to request verification code');
     return true;
@@ -92,8 +114,6 @@ export default function VerifyEmailPage() {
     setResendLoading(true);
     try {
       await sendVerificationEmail(userEmail);
-      // Clear input and keep sent code server-side
-      sentVerificationCodeRef.current = null;
       setVerificationCodeInput('');
       toast({ title: 'Code Sent', description: 'A new verification code has been sent to your email.' });
     } catch (error) {
@@ -112,76 +132,64 @@ export default function VerifyEmailPage() {
     setLoading(true);
     
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        toast({
+          title: 'Error',
+          description: 'No authenticated user found. Please try logging in again.',
+          variant: 'destructive',
+        });
+        router.push('/login');
+        return;
+      }
+
       // Try to verify the code
-      const result = await verifyEmailCodeAPI(userEmail, values.code);
+      const response = await verifyEmailCodeAPI(userEmail, values.code);
       
-      if (result.success) {
-        const user = auth.currentUser;
-        if (user) {
-          try {
-            // First update the user document
-            const userDocRef = doc(db, 'users', user.uid);
-            await updateDoc(userDocRef, {
-              emailVerified: true,
-              verifiedAt: new Date(),
-            });
-            
-            // Then force reload the auth state to ensure it's up to date
-            await user.reload();
-            
-            // Then update the email verified flag in Firebase Auth
-            await user.updateProfile({
-              emailVerified: true
-            });
-            
-            // Show success message
-            toast({ 
-              title: 'Email Verified!', 
-              description: 'Your email has been successfully verified. Welcome to Vibez!' 
-            });
-            
-            // Force refresh the ID token to ensure all claims are up to date
-            await user.getIdToken(true);
-            
-            // Small delay to ensure all updates are processed
-            setTimeout(async () => {
-              try {
-                await user.reload();
-                router.push('/');
-              } catch (error) {
-                console.error('Error during final reload:', error);
-                // If there's an error, try direct navigation
-                window.location.href = '/';
-              }
-            }, 2000);
-            
-          } catch (dbError) {
-            console.error('Error updating verification status:', dbError);
-            toast({
-              title: 'Verification Issue',
-              description: 'Your email was verified but there was an issue updating your profile. Please try logging in again.',
-              variant: 'destructive',
-            });
-            
-            // If we can't update the profile, sign out and redirect to login
-            setTimeout(async () => {
-              await auth.signOut();
-              router.push('/login?message=Please sign in again to complete verification');
-            }, 2000);
-          }
-        } else {
+      if (response.success) {
+        try {
+          // Clear any cached verification status
+          localStorage.removeItem(`emailVerified_${user.uid}`);
+          localStorage.removeItem(`lastVerificationCheck_${user.uid}`);
+
+          // Update user document with optimistic concurrency
+          const userDocRef = doc(db, 'users', user.uid);
+          await updateDoc(userDocRef, {
+            emailVerified: true,
+            verifiedAt: serverTimestamp(),
+            lastUpdated: serverTimestamp()
+          });
+          
+          // Reload the user to get the latest token
+          await user.reload();
+          
+          // Cache the new verification status
+          localStorage.setItem(`emailVerified_${user.uid}`, 'true');
+          localStorage.setItem(`lastVerificationCheck_${user.uid}`, Date.now().toString());
+        } catch (error) {
           toast({
-            title: 'Auth State Error',
-            description: 'Please sign in again to complete verification.',
+            title: 'Verification Issue',
+            description: 'Your email was verified but there was an issue updating your profile. Please try logging in again.',
             variant: 'destructive',
           });
-          router.push('/login');
+
+          // If we can't update the profile, sign out and redirect to login
+          setTimeout(async () => {
+            await auth.signOut();
+            router.push('/login?message=Please sign in again to complete verification');
+          }, 2000);
         }
       } else {
+        toast({
+          title: 'Auth State Error',
+          description: 'Please sign in again to complete verification.',
+          variant: 'destructive',
+        });
+        router.push('/login');
         // Invalid code response with specific message from server
         toast({ 
           title: 'Verification Failed', 
-          description: result.message || 'The verification code is incorrect or has expired. Please try again or request a new code.',
+          description: response.message || 'The verification code is incorrect or has expired. Please try again or request a new code.',
           variant: 'destructive' 
         });
         

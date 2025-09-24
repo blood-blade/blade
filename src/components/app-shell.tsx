@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { continueConversation } from '@/ai/flows/ai-chat-flow';
 import { useAuth } from '@/hooks/use-auth';
 import { useNotifications } from '@/hooks/use-notifications';
+import { type Firestore } from 'firebase/firestore';
 import { db, storage } from '@/lib/firebase';
 import type { Conversation, Message, Story, User, StoryReaction } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -54,37 +55,47 @@ export async function uploadToCloudinaryXHR(
   onProgress?: (p: number) => void,
   signal?: { xhrAbort?: () => void }
 ): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', uploadPreset);
+  const url = `https://api.cloudinary.com/v1_1/${cloudName}/upload`;
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', uploadPreset);
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
-
-    xhr.upload.onprogress = (ev) => {
-      if (ev.lengthComputable && onProgress) {
-        onProgress((ev.loaded / ev.total) * 100);
-      }
-    };
-
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState === 4) {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try { resolve(JSON.parse(xhr.responseText)); }
-          catch (e) { reject(new Error('Invalid JSON response from Cloudinary')); }
-        } else {
-          reject(new Error(`Cloudinary upload failed: ${xhr.status} ${xhr.responseText}`));
-        }
-      }
-    };
-
-    xhr.onerror = () => reject(new Error('Network error during Cloudinary upload'));
-    xhr.send(formData);
-
-    if (signal) signal.xhrAbort = () => { try { xhr.abort(); } catch(e){} };
+  console.log('Starting upload with config:', {
+    url,
+    cloudName,
+    uploadPreset,
+    fileType: file.type,
+    fileSize: file.size
   });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      mode: 'cors', // Explicit CORS mode
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Upload failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        response: errorText,
+        headers: Object.fromEntries(response.headers)
+      });
+      throw new Error(`Cloudinary upload failed: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('Cloudinary upload success:', data);
+    return data;
+  } catch (error) {
+    console.error('Upload error:', error);
+    throw error;
+  }
 }
 
 
@@ -464,36 +475,46 @@ useEffect(() => {
 
     setMessages(prev => [...prev, optimisticMessage]);
 
-    const messageCollectionRef = collection(db, 'conversations', chatId, 'messages');
-    const newMessageRef = doc(messageCollectionRef);
-    const messageData: any = {
-      senderId: senderId,
-      text: messageText,
-      timestamp: serverTimestamp(),
-      clientTempId: tempId,
-    };
-    if (replyTo) messageData.replyTo = replyTo;
-    
-    const chatRef = doc(db, 'conversations', chatId);
+    try {
+      await runTransaction(db, async (transaction) => {
+        // Get the current conversation state
+        const chatRef = doc(db, 'conversations', chatId);
+        const chatDoc = await transaction.get(chatRef);
+        
+        if (!chatDoc.exists()) {
+          throw new Error('Conversation not found');
+        }
 
-    writeBatch(db)
-      .set(newMessageRef, messageData)
-      .update(chatRef, {
+        // Create new message
+        const messageCollectionRef = collection(db, 'conversations', chatId, 'messages');
+        const newMessageRef = doc(messageCollectionRef);
+        const messageData = {
+          senderId: senderId,
+          text: messageText,
+          timestamp: serverTimestamp(),
+          clientTempId: tempId,
+          ...(replyTo && { replyTo })
+        };
+
+        // Update both the message and conversation atomically
+        transaction.set(newMessageRef, messageData);
+        transaction.update(chatRef, {
           lastMessage: {
-              text: messageText,
-              senderId: senderId,
-              timestamp: serverTimestamp(),
+            text: messageText,
+            senderId: senderId,
+            timestamp: serverTimestamp(),
           },
-      })
-      .commit()
-      .catch(error => {
-          console.error('Error sending message: ', error);
-          setMessages(prev => prev.map(m => 
-              m.clientTempId === tempId ? { ...m, status: 'error' } : m
-          ));
+        });
       });
-    
-    return tempId;
+      
+      return tempId;
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setMessages(prev => prev.map(m => 
+        m.clientTempId === tempId ? { ...m, status: 'error' } : m
+      ));
+      throw error;
+    }
   
   }, [currentUser]);
 
@@ -661,10 +682,28 @@ useEffect(() => {
 
     const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+    
+    // Debug environment variables
+    console.log('Environment check:', {
+      nodeEnv: process.env.NODE_ENV,
+      hasCloudName: !!cloudName,
+      hasUploadPreset: !!uploadPreset,
+      cloudinaryKeys: Object.keys(process.env).filter(key => key.includes('CLOUDINARY'))
+    });
+    
     if (!cloudName || !uploadPreset) {
+        const error = 'Missing Cloudinary configuration';
+        console.error('Configuration error:', { 
+          cloudName: cloudName ? 'SET' : 'MISSING',
+          uploadPreset: uploadPreset ? 'SET' : 'MISSING'
+        });
         setMessages(prev => prev.map(m => m.clientTempId === tempId ? {...m, status: 'error'} : m));
-        toast({ title: 'Cloudinary config missing', variant: 'destructive' });
-        return Promise.reject('Cloudinary config missing');
+        toast({ 
+          title: 'Upload Error', 
+          description: 'Missing Cloudinary configuration. Please check your environment setup.',
+          variant: 'destructive' 
+        });
+        return Promise.reject(error);
     }
 
     let xhrSignal: { xhrAbort?: ()=>void } = {};
@@ -711,7 +750,22 @@ useEffect(() => {
   const handleFileUpload = useCallback(async (file: File, messageText: string, chatId: string, senderId: string): Promise<string> => {
       // Videos, Images, Audio, GIFs -> Cloudinary
       if (file.type.startsWith('video/') || file.type.startsWith('image/') || file.type.startsWith('audio/')) {
-        return handleCloudinaryUpload(file, messageText, chatId, senderId);
+        try {
+          console.log('Starting Cloudinary upload for file:', {
+            type: file.type,
+            size: file.size,
+            name: file.name
+          });
+          return await handleCloudinaryUpload(file, messageText, chatId, senderId);
+        } catch (error) {
+          console.error('Cloudinary upload failed:', error);
+          toast({
+            title: 'Upload Failed',
+            description: 'Could not upload file to Cloudinary. Please try again.',
+            variant: 'destructive'
+          });
+          throw error;
+        }
       }
     
       // Other files -> Firebase Storage
@@ -1479,6 +1533,35 @@ function AppBackground() {
 
 export function AppShell({ children }: { children: React.ReactNode }): JSX.Element {
   const chatData = useChatData();
+  const { toast } = useToast();
+  
+  // Check for blocked Firestore requests
+  useEffect(() => {
+    const checkFirestore = async () => {
+      try {
+        // Try a simple Firestore operation
+        const testRef = doc(db, '_health_check', 'test');
+        await getDoc(testRef).catch(e => {
+          // Ignore document not found errors
+          if (e?.code !== 'not-found') throw e;
+        });
+      } catch (error: any) {
+        console.error('Firestore check error:', error);
+        if (error?.message?.includes('ERR_BLOCKED_BY_CLIENT')) {
+          toast({
+            title: "Connection Issue",
+            description: "Please disable any ad blockers or privacy extensions that might interfere with the app's functionality.",
+            variant: "destructive",
+            duration: 10000
+          });
+        }
+      }
+    };
+    
+    if (typeof window !== 'undefined') {
+      checkFirestore();
+    }
+  }, [toast]);
   
   // Setup presence and online status monitoring
   usePresence(chatData.currentUser);

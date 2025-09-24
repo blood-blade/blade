@@ -193,16 +193,30 @@ export function NewChatDialog({ users, onCreateChat, onCreateGroupChat, children
                       displayedUsers.map(user => (
                         <div
                           key={user.id}
-                          className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 cursor-pointer"
-                          onClick={() => handleCreateChatClick(user)}
+                          className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
                         >
-                          <div className="flex items-center gap-3">
+                          <div 
+                            className="flex items-center gap-3 flex-1 cursor-pointer"
+                            onClick={() => {
+                              setIsOpen(false);
+                              window.location.href = `/friends/${user.uid}`;
+                            }}
+                          >
                             <UserAvatar user={user} className="h-10 w-10" />
                             <div>
                               <p className="font-semibold">{user.name}</p>
                               <p className="text-sm text-muted-foreground">{user.email || 'No email'}</p>
                             </div>
                           </div>
+                          <Button 
+                            variant="ghost" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCreateChatClick(user);
+                            }}
+                          >
+                            Message
+                          </Button>
                         </div>
                       ))
                     ) : (

@@ -1,13 +1,14 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from './ui/button';
 import { Sun, Cloud, CloudRain, Wind, Zap, Snowflake, Loader2, MapPin, CloudFog, CloudSun } from 'lucide-react';
 import { getWeather, GetWeatherOutput } from '@/ai/flows/weather-flow';
 import { useToast } from '@/hooks/use-toast';
 import { useAppearance } from './providers/appearance-provider';
 import { useRouter } from 'next/navigation';
+import { getCityFromCoords } from '@/lib/geocoding';
 
 const weatherIcons: Record<GetWeatherOutput['condition'], React.ReactNode> = {
     Sunny: <Sun className="w-5 h-5 text-yellow-400" />,
@@ -22,17 +23,8 @@ const weatherIcons: Record<GetWeatherOutput['condition'], React.ReactNode> = {
     Fog: <CloudFog className="w-5 h-5 text-gray-400" />,
 };
 
-async function getCityFromCoords(latitude: number, longitude: number): Promise<string | null> {
-    try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-        if (!response.ok) throw new Error("Failed to fetch city from coordinates");
-        const data = await response.json();
-        return data.address.city || data.address.town || data.address.village || null;
-    } catch (error) {
-        console.error('Error fetching city from coordinates:', error);
-        return null;
-    }
-}
+// 15-minute refresh interval for weather data
+const WEATHER_REFRESH_INTERVAL = 15 * 60 * 1000;
 
 
 export function WeatherWidget() {
@@ -41,6 +33,8 @@ export function WeatherWidget() {
     const { toast } = useToast();
     const router = useRouter();
     const { weatherLocation, setWeatherLocation, weatherUnit } = useAppearance();
+    const lastUpdateRef = useRef<number>(0);
+    const updateIntervalRef = useRef<NodeJS.Timeout>();
     
     const fetchWeather = useCallback(async (loc: string, unit: 'Celsius' | 'Fahrenheit') => {
         if (!loc) {
@@ -48,44 +42,76 @@ export function WeatherWidget() {
             setWeather(null);
             return;
         };
+
+        // Check if we should refresh based on time elapsed
+        const now = Date.now();
+        if (weather && now - lastUpdateRef.current < WEATHER_REFRESH_INTERVAL) {
+            setIsLoading(false);
+            return;
+        }
+
         setIsLoading(true);
         try {
             const result = await getWeather({ location: loc, unit });
             setWeather(result);
+            lastUpdateRef.current = now;
         } catch (error) {
             console.error("Error fetching weather:", error);
-            setWeather(null);
-            toast({
-                title: 'Could not fetch weather',
-                description: 'The location might not be recognized. Please try a different city in settings.',
-                variant: 'destructive',
-            });
+            // Keep the old weather data if it exists
+            if (!weather) {
+                setWeather(null);
+                toast({
+                    title: 'Could not fetch weather',
+                    description: 'The location might not be recognized. Please try a different city in settings.',
+                    variant: 'destructive',
+                });
+            }
         } finally {
             setIsLoading(false);
         }
-    }, [toast]);
+    }, [toast, weather]);
     
     useEffect(() => {
-        if (weatherLocation) {
-            fetchWeather(weatherLocation, weatherUnit);
-        } else {
-            // Only try to geolocate if location is not set
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
+        // Clear any existing interval
+        if (updateIntervalRef.current) {
+            clearInterval(updateIntervalRef.current);
+        }
+
+        const updateWeather = async () => {
+            if (weatherLocation) {
+                fetchWeather(weatherLocation, weatherUnit);
+            } else {
+                // Only try to geolocate if location is not set
+                try {
+                    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+                    });
+
                     const city = await getCityFromCoords(position.coords.latitude, position.coords.longitude);
                     if (city) {
-                        setWeatherLocation(city); // This will trigger the other effect
+                        setWeatherLocation(city); // This will trigger another effect
                     } else {
                         setIsLoading(false);
                     }
-                },
-                (error) => {
+                } catch (error) {
                     console.warn("Geolocation error:", error);
-                    setIsLoading(false); 
-                },
-                { timeout: 5000 }
-            );
-        }
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        // Initial update
+        updateWeather();
+
+        // Set up periodic updates
+        updateIntervalRef.current = setInterval(updateWeather, WEATHER_REFRESH_INTERVAL);
+
+        // Cleanup
+        return () => {
+            if (updateIntervalRef.current) {
+                clearInterval(updateIntervalRef.current);
+            }
+        };
     }, [weatherLocation, weatherUnit, fetchWeather, setWeatherLocation]);
 
 
