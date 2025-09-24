@@ -13,7 +13,8 @@ import { Separator } from './ui/separator';
 import { BellOff, Ban, Bell, MessageSquareText, Shield, UserPlus, Check, UserCheck, X, UserX } from 'lucide-react';
 import Image from 'next/image';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import React, from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from './ui/tooltip';
+import React from 'react';
 
 interface UserProfileSheetProps {
   user: User;
@@ -94,9 +95,11 @@ export function UserProfileSheet({
         </Button>
     )
   }
-  
+
+  // Main render
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
+    <TooltipProvider>
+      <Sheet open={isOpen} onOpenChange={onOpenChange}>
       <SheetContent className="w-full max-w-md bg-background/90 backdrop-blur-lg p-0 flex flex-col">
         <SheetHeader className="p-6 pb-0 text-left">
           <SheetTitle>Contact Info</SheetTitle>
@@ -117,8 +120,17 @@ export function UserProfileSheet({
                     alt={user.name}
                     width={800}
                     height={800}
-                    className="rounded-lg h-full w-full"
-                    style={{objectFit: "contain"}}
+                    className="rounded-lg max-h-[80vh] w-auto mx-auto"
+                    style={{
+                      objectFit: "contain",
+                      maxWidth: "90vw"
+                    }}
+                    priority
+                    quality={95}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      img.style.display = 'none';
+                    }}
                     />
                 </DialogContent>
               )}
@@ -126,7 +138,14 @@ export function UserProfileSheet({
             <div className="text-center">
               <div className="flex items-center gap-2 justify-center">
                 <h2 className="text-2xl font-bold">{user.name}</h2>
-                {user.isPrivate && <Shield className="h-5 w-5 text-muted-foreground" title="This account is private" />}
+                {user.isPrivate && (
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Shield className="h-5 w-5 text-muted-foreground" aria-label="Private account" />
+                    </TooltipTrigger>
+                    <TooltipContent>This account is private</TooltipContent>
+                  </Tooltip>
+                )}
               </div>
               <p className="text-muted-foreground">{user.email}</p>
             </div>
@@ -186,5 +205,6 @@ export function UserProfileSheet({
         </div>
       </SheetContent>
     </Sheet>
+    </TooltipProvider>
   );
 }

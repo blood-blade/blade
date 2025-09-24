@@ -71,6 +71,8 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
   const [message, setMessage] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showCropper, setShowCropper] = useState(true);
   const { toast } = useToast();
   const [crop, setCrop] = useState<Crop | undefined>(undefined);
   const percentCropRef = useRef<Crop | undefined>(undefined);
@@ -121,8 +123,8 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
     const minSize = 50;
     const maxSize = Math.min(imgWidth, imgHeight, 300);
     
-    const newCrop = {
-      unit: 'px',
+    const newCrop: Crop = {
+      unit: "px" as const,
       width: Math.min(Math.max(c.width || minSize, minSize), maxSize),
       height: Math.min(Math.max(c.height || minSize, minSize), maxSize),
       x: Math.max(0, Math.min(c.x || 0, imgWidth - (c.width || 0))),
@@ -142,6 +144,8 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
     try {
       let fileToSend = file;
       if (mode === 'avatar' && imgRef.current) {
+        setIsProcessing(true);
+        setShowCropper(false);
         const percentCrop = percentCropRef.current;
         if (percentCrop && percentCrop.width && percentCrop.height) {
           fileToSend = await getCroppedCircularImage(imgRef.current, percentCrop, 'avatar.png');
@@ -157,6 +161,7 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
       });
     } finally {
       setIsSending(false);
+      setIsProcessing(false);
       onCancel();
     }
   };
@@ -179,42 +184,61 @@ export function ImagePreviewDialog({ file, onSend, onCancel, mode }: ImagePrevie
           {isImage && previewUrl ? (
             mode === 'avatar' ? (
               <div className="relative w-full h-full flex items-center justify-center">
-                <div style={{ 
-                  maxWidth: '500px',
-                  width: '100%',
-                  maxHeight: '50vh',
-                  overflow: 'hidden',
-                  position: 'relative'
-                }}>
-                  <ReactCrop
-                    crop={crop}
-                    onChange={handleCropChange}
-                    onComplete={handleCropComplete}
-                    aspect={1}
-                    circularCrop
-                    minWidth={50}
-                    minHeight={50}
-                    maxWidth={300}
-                    maxHeight={300}
-                    keepSelection
-                    ruleOfThirds
-                    className="max-w-full"
-                  >
+                {isProcessing ? (
+                  <div className="flex items-center justify-center p-8">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                    <span className="ml-2">Processing image...</span>
+                  </div>
+                ) : showCropper ? (
+                  <div style={{ 
+                    maxWidth: '500px',
+                    width: '100%',
+                    maxHeight: '50vh',
+                    overflow: 'hidden',
+                    position: 'relative'
+                  }}>
+                    <ReactCrop
+                      crop={crop}
+                      onChange={handleCropChange}
+                      onComplete={handleCropComplete}
+                      aspect={1}
+                      circularCrop
+                      minWidth={50}
+                      minHeight={50}
+                      maxWidth={300}
+                      maxHeight={300}
+                      keepSelection
+                      ruleOfThirds
+                      className="max-w-full"
+                    >
+                      <img
+                        ref={imgRef}
+                        src={previewUrl}
+                        alt="Image preview"
+                        style={{ 
+                          maxHeight: '50vh',
+                          width: '100%',
+                          objectFit: 'contain',
+                          display: 'block'
+                        }}
+                        onLoad={onImageLoad}
+                        draggable={false}
+                      />
+                    </ReactCrop>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center">
                     <img
-                      ref={imgRef}
                       src={previewUrl}
-                      alt="Image preview"
+                      alt="Cropped preview"
                       style={{ 
-                        maxHeight: '50vh',
-                        width: '100%',
-                        objectFit: 'contain',
-                        display: 'block'
+                        maxHeight: '300px',
+                        width: 'auto',
+                        borderRadius: '50%'
                       }}
-                      onLoad={onImageLoad}
-                      draggable={false}
                     />
-                  </ReactCrop>
-                </div>
+                  </div>
+                )}
               </div>
             ) : (
               <NextImage

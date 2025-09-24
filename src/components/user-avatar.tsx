@@ -1,4 +1,5 @@
 
+import { useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
@@ -13,8 +14,11 @@ type UserAvatarProps = {
 };
 
 export function UserAvatar({ user, className, isFriend }: UserAvatarProps) {
+  const [hasImageError, setHasImageError] = useState(false);
+  const [isImageLoading, setIsImageLoading] = useState(true);
+
   if (!user) {
-    return <Avatar className={cn('border-2 border-background bg-muted', className)} />;
+    return <Avatar className={cn('border-2 border-background bg-muted rounded-full overflow-hidden', className)} />;
   }
 
   const getInitials = (name: string) => {
@@ -29,27 +33,50 @@ export function UserAvatar({ user, className, isFriend }: UserAvatarProps) {
   
   const fallback = name ? getInitials(name) : 'U';
   
-  const canDisplayImage = photoURL && (photoURL.startsWith('data:image') || photoURL.startsWith('http'));
+  const canDisplayImage = photoURL && (photoURL.startsWith('data:image') || photoURL.startsWith('http')) && !hasImageError;
+
+  const handleImageError = () => {
+    console.log('Avatar image failed to load:', photoURL);
+    setHasImageError(true);
+    setIsImageLoading(false);
+  };
+
+  const handleImageLoad = () => {
+    setIsImageLoading(false);
+    setHasImageError(false);
+  };
 
   return (
     <div className="relative">
       <Avatar className={cn(
-        'border-2 border-background', 
+        'border-2 border-background rounded-full overflow-hidden', 
         isFriend && 'border-green-500',
         className
       )}>
         {canDisplayImage ? (
-          <AvatarImage
-            src={photoURL}
-            alt={name || 'User avatar'}
-            className="object-cover"
-            style={{ 
-              objectPosition: 'center center',
-              imageRendering: '-webkit-optimize-contrast'
-            }}
-          />
+          <>
+            <AvatarImage
+              src={photoURL}
+              alt={name || 'User avatar'}
+              className={cn(
+                "aspect-square w-full h-full object-cover rounded-full transition-opacity duration-200",
+                isImageLoading ? 'opacity-0' : 'opacity-100'
+              )}
+              style={{ 
+                objectPosition: 'center',
+                imageRendering: '-webkit-optimize-contrast'
+              }}
+              onError={handleImageError}
+              onLoad={handleImageLoad}
+            />
+            {isImageLoading && (
+              <AvatarFallback className="rounded-full animate-pulse">
+                {fallback}
+              </AvatarFallback>
+            )}
+          </>
         ) : (
-          <AvatarFallback>{fallback}</AvatarFallback>
+          <AvatarFallback className="rounded-full">{fallback}</AvatarFallback>
         )}
       </Avatar>
       {status === 'online' && (

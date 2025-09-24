@@ -1,10 +1,14 @@
 
 "use client";
 import '../styles/glass-theme.css';
+import type { MessageReaction } from '@/lib/types';
 import {
   addDoc, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, orderBy, query,
-  runTransaction, serverTimestamp, Timestamp, updateDoc, where, writeBatch, limit, startAfter, setDoc
+  runTransaction, serverTimestamp, Timestamp, updateDoc, where, writeBatch, limit, startAfter, setDoc, deleteField,
+  DocumentData, DocumentSnapshot
 } from 'firebase/firestore';
+import { usePresence } from '@/hooks/use-presence';
+import { useOnlineStatus } from '@/hooks/use-online-status';
 import { getDownloadURL, ref, uploadBytesResumable, UploadTask } from 'firebase/storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,7 +32,18 @@ import { MobileGalaxyBackground } from './mobile-galaxy-background';
 
 const AI_USER_ID = 'gemini-ai-chat-bot-7a4b9c1d-f2e3-4d56-a1b2-c3d4e5f6a7b8';
 const AI_USER_NAME = 'Gemini';
-const AI_AVATAR_URL = '/gemini-logo.svg';
+const AI_AVATAR_URL = '/gemini-logo.png';
+
+// Helper function to ensure consistent AI user data
+const getAiUserData = () => ({
+  id: AI_USER_ID,
+  uid: AI_USER_ID,
+  name: AI_USER_NAME,
+  photoURL: AI_AVATAR_URL,
+  avatarUrl: AI_AVATAR_URL,
+  displayPhoto: AI_AVATAR_URL,
+  status: 'online',
+});
 
 const PAGE_SIZE = 30;
 
@@ -83,7 +98,7 @@ function useChatData() {
     uid: AI_USER_ID,
     name: AI_USER_NAME,
     photoURL: AI_AVATAR_URL,
-    status: 'online',
+    status: 'online'
   };
 
   const initialAiConversation: Conversation = {
@@ -263,11 +278,34 @@ useEffect(() => {
     }
   }, [aiConversation, selectedChat]);
 
+  // Cleanup temporary URLs when component unmounts
+  useEffect(() => {
+    return () => {
+      messages.forEach(message => {
+        if (message.file?.url.startsWith('blob:')) {
+          URL.revokeObjectURL(message.file.url);
+        }
+      });
+      
+      // Also cleanup any pending uploads
+      uploadTasks.current.forEach(task => task.cancel());
+      xhrRequests.current.forEach(request => request.xhrAbort?.());
+      uploadTasks.current.clear();
+      xhrRequests.current.clear();
+      setUploadProgress(new Map());
+    };
+  }, [messages]);
+
 
   // Message fetching logic
   const handleChatSelect = useCallback(async (chatId: string) => {
     if (messagesUnsubscribe.current) {
         messagesUnsubscribe.current();
+    }
+
+    // Reset AI typing state when switching chats
+    if (selectedChat?.id === AI_USER_ID && chatId !== AI_USER_ID) {
+        setIsAiReplying(false);
     }
 
     const chat = conversations.find(c => c.id === chatId) || (chatId === AI_USER_ID ? aiConversation : undefined);
@@ -529,32 +567,45 @@ useEffect(() => {
 
   const handleAiConversation = useCallback(async (messageText: string) => {
     if (!currentUser) return;
-
-    const userMessage: Message = {
-      id: uuidv4(),
-      senderId: currentUser.uid,
-      text: messageText,
-      timestamp: new Date(),
-      status: 'read',
-    };
     
-    // Optimistically update AI chat
-    const tempAiConvo = {
-      ...aiConversation,
-      messages: [...(aiConversation.messages || []), userMessage],
-      lastMessage: { text: messageText, senderId: currentUser.uid, timestamp: new Date() as any }
+    let cleanup = () => {
+      setIsAiReplying(false);
     }
-    setAiConversation(tempAiConvo);
-    setSelectedChat(tempAiConvo);
-
-    setIsAiReplying(true);
-
+    
     try {
+      const userMessage: Message = {
+        id: uuidv4(),
+        senderId: currentUser.uid,
+        text: messageText,
+        timestamp: new Date(),
+        status: 'read',
+      };
+
+      // Optimistically update AI chat with user message
+      const tempAiConvo = {
+        ...aiConversation,
+        messages: [...(aiConversation.messages || []), userMessage],
+        lastMessage: { text: messageText, senderId: currentUser.uid, timestamp: new Date() as any }
+      };
+      
+      setAiConversation(tempAiConvo);
+      
+      // Only update selectedChat if we're still on the AI chat
+      if (selectedChat?.id === AI_USER_ID) {
+        setSelectedChat(tempAiConvo);
+      }
+
+      setIsAiReplying(true);
+      
       const history = (tempAiConvo.messages)
           .slice(-10) 
           .map(m => (m.senderId === currentUser.uid ? { user: m.text } : { model: m.text }));
 
       const aiResponse = await continueConversation({ message: messageText, history });
+
+      if (!aiResponse?.reply) {
+        throw new Error("No response received from AI");
+      }
 
       const aiMessage: Message = {
         id: uuidv4(),
@@ -577,22 +628,27 @@ useEffect(() => {
 
     } catch (error) {
       console.error("Error with AI conversation:", error);
-       const errorMessage: Message = {
-          id: uuidv4(),
-          senderId: AI_USER_ID,
-          text: "Sorry, I encountered an error. Please try again.",
-          timestamp: new Date(),
-          status: 'read',
-        };
-       setAiConversation(prev => {
-          const finalAiConvo = { ...prev, messages: [...prev.messages, errorMessage] };
-          setSelectedChat(finalAiConvo);
-          return finalAiConvo;
-        });
+      const errorMessage: Message = {
+        id: uuidv4(),
+        senderId: AI_USER_ID,
+        text: "Sorry, I encountered an error. Please try again.",
+        timestamp: new Date(),
+        status: 'read',
+      };
+      setAiConversation(prev => {
+        const finalAiConvo = { ...prev, messages: [...prev.messages, errorMessage] };
+        setSelectedChat(finalAiConvo);
+        return finalAiConvo;
+      });
+      toast({
+        title: "AI Error",
+        description: "There was an error generating the AI response. Please try again.",
+        variant: "destructive"
+      });
     } finally {
-      setIsAiReplying(false);
+      cleanup();
     }
-  }, [currentUser, aiConversation]);
+  }, [currentUser, aiConversation, selectedChat, toast]);
   
   const handleCloudinaryUpload = useCallback(async (file: File, messageText: string, chatId: string, senderId: string): Promise<string> => {
     const tempId = uuidv4();
@@ -752,8 +808,19 @@ useEffect(() => {
         xhrRequests.current.delete(messageId);
     }
     
+    // Clean up any file URLs
+    const message = messages.find(m => m.clientTempId === messageId);
+    if (message?.file?.url.startsWith('blob:')) {
+      URL.revokeObjectURL(message.file.url);
+    }
+    
     setMessages(prev => prev.filter(m => m.clientTempId !== messageId));
-  }, []);
+    setUploadProgress(prev => {
+      const newProgress = new Map(prev);
+      newProgress.delete(messageId);
+      return newProgress;
+    });
+  }, [messages]);
 
 
   const handleCreateChat = useCallback(async (targetUser: User): Promise<string> => {
@@ -837,163 +904,116 @@ useEffect(() => {
     }
   }, [conversations, selectedChat?.id]);
 
- const handleMessageAction = useCallback(async (
+  const handleMessageAction = useCallback(async (
     messageId: string,
     action: 'react' | 'delete',
-    data?: any
-  ) => {
+    data?: unknown
+  ): Promise<void> => {
     if (!selectedChat || !currentUser) return;
+
+    if (action === 'delete') {
+      const messageToDelete = messages.find(m => m.id === messageId || m.clientTempId === messageId);
+      if (!messageToDelete) return;
     
-      if (action === 'delete') {
+    if (action === 'delete') {
       const messageToDelete = messages.find(m => m.id === messageId || m.clientTempId === messageId);
       if (!messageToDelete) return;
       
+      // Optimistically update messages list
+      setMessages(prevMessages => prevMessages.map(msg => 
+        msg.id === messageToDelete.id ? {
+          ...msg,
+          text: 'This message was deleted.',
+          file: undefined,
+          deleted: true,
+          reactions: []
+        } : msg
+      ));
+      
+      // Always update the conversation's last message for optimistic UI
+      const previousMessage = messages
+        .filter(m => m.id !== messageToDelete.id && !m.deleted)
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
+      
+      setConversations(prevConvos => prevConvos.map(convo =>
+        convo.id === selectedChat.id ? {
+          ...convo,
+          lastMessage: previousMessage ? {
+            text: previousMessage.text,
+            senderId: previousMessage.senderId,
+            timestamp: Timestamp.fromDate(previousMessage.timestamp)
+          } : undefined
+        } : convo
+      ));
+      }
+      
       const messageRef = doc(db, 'conversations', selectedChat.id, 'messages', messageToDelete.id);
-      const chatRef = doc(db, 'conversations', selectedChat.id);
-
-      // Optimistically update the UI immediately
-      setMessages(prevMessages => prevMessages.map(msg => {
-        if (msg.id === messageId || msg.clientTempId === messageId) {
-          return {
-            ...msg,
-            deleted: true,
-            text: 'This message was deleted.',
-            file: null,
-            reactions: []
-          };
-        }
-        return msg;
-      }));
+      const convoRef = doc(db, 'conversations', selectedChat.id);
       
       try {
-        const batch = writeBatch(db);
-        
-        // Prepare update data without any undefined values
-        const updateData: Record<string, any> = {
-          deleted: true,
-          text: 'This message was deleted.',
-          file: null,
-          reactions: [],
-          senderId: messageToDelete.senderId,
-          timestamp: messageToDelete.timestamp
-        };
-
-        // Only include fields that exist in the original message
-        if (messageToDelete.replyTo) {
-          updateData.replyTo = messageToDelete.replyTo;
-        }
-        
-        // Update the message to be deleted
-        batch.update(messageRef, updateData);
-
-        // If this was the last message, find the previous message to update lastMessage
-        if (selectedChat.lastMessage?.timestamp?.toMillis() === messageToDelete.timestamp?.toMillis()) {
-          // Optimistically update the conversation's last message
-          setConversations(prevConvos => prevConvos.map(conv => {
-            if (conv.id === selectedChat.id) {
-              return {
-                ...conv,
-                lastMessage: {
-                  text: 'This message was deleted',
-                  senderId: messageToDelete.senderId,
-                  timestamp: messageToDelete.timestamp
-                }
-              };
-            }
-            return conv;
-          }));
-
-          const messagesQuery = query(
-            collection(db, 'conversations', selectedChat.id, 'messages'),
-            orderBy('timestamp', 'desc'),
-            where('deleted', '!=', true),
-            limit(1)
-          );
+        await runTransaction(db, async (transaction) => {
+          // Update the message
+          transaction.update(messageRef, {
+            text: 'This message was deleted.',
+            file: deleteField(),
+            deleted: true,
+            reactions: []
+          });
           
-          const previousMessages = await getDocs(messagesQuery);
-          
-          if (!previousMessages.empty) {
-            const previousMessage = previousMessages.docs[0].data();
-            batch.update(chatRef, {
+          // Always check if this affects the last message
+          const previousMessage = messages
+            .filter(m => m.id !== messageToDelete.id && !m.deleted)
+            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
+
+          // Update conversation's lastMessage
+          if (previousMessage) {
+            transaction.update(convoRef, {
               lastMessage: {
-                text: previousMessage.text || '',
+                text: previousMessage.text,
                 senderId: previousMessage.senderId,
-                timestamp: previousMessage.timestamp
+                timestamp: Timestamp.fromDate(previousMessage.timestamp)
               }
             });
-
-            // Update the UI with the actual previous message
-            setConversations(prevConvos => prevConvos.map(conv => {
-              if (conv.id === selectedChat.id) {
-                return {
-                  ...conv,
-                  lastMessage: {
-                    text: previousMessage.text || '',
-                    senderId: previousMessage.senderId,
-                    timestamp: previousMessage.timestamp
-                  }
-                };
-              }
-              return conv;
-            }));
           } else {
-            // If no previous messages exist, clear the lastMessage
-            batch.update(chatRef, {
-              lastMessage: null
+            transaction.update(convoRef, {
+              lastMessage: deleteField()
             });
-
-            // Update UI to reflect no last message
-            setConversations(prevConvos => prevConvos.map(conv => {
-              if (conv.id === selectedChat.id) {
-                return {
-                  ...conv,
-                  lastMessage: null
-                };
-              }
-              return conv;
-            }));
           }
-        }
-
-        await batch.commit();
+        });
       } catch (error) {
         console.error("Error deleting message", error);
-        toast({
-          title: "Error",
-          description: "Could not delete the message. Please try again.",
-          variant: "destructive",
-        });
-        
         // Revert optimistic updates on error
-        setMessages(prevMessages => prevMessages.map(msg => {
-          if (msg.id === messageId) {
-            return messageToDelete;
-          }
-          return msg;
-        }));
+        setMessages(prevMessages => prevMessages.map(msg => 
+          msg.id === messageToDelete.id ? messageToDelete : msg
+        ));
+        setConversations(prevConvos => prevConvos.map(convo =>
+          convo.id === selectedChat.id ? {
+            ...convo,
+            lastMessage: selectedChat.lastMessage
+          } : convo
+        ));
       }
-      return;
-    }    if (action === 'react') {
-      const emoji = data;
+    } else if (action === 'react') {
+      const emoji = data as string;
       
       setMessages(prevMessages => prevMessages.map(msg => {
           if (msg.id === messageId) {
               const reactions = msg.reactions || [];
-              let existingReaction = reactions.find(r => r.emoji === emoji);
-              let newReactions;
+              const existingReaction = reactions.find(r => r.emoji === emoji);
+              let newReactions: MessageReaction[];
 
               if (existingReaction) {
-                  const userIndex = existingReaction.users.indexOf(currentUser!.uid);
+                  const userIndex = existingReaction.users.indexOf(currentUser.uid);
                   if (userIndex > -1) {
                       existingReaction.users.splice(userIndex, 1);
                       existingReaction.count--;
                   } else {
-                      existingReaction.users.push(currentUser!.uid);
+                      existingReaction.users.push(currentUser.uid);
                       existingReaction.count++;
                   }
                   newReactions = reactions.filter(r => r.count > 0);
               } else {
-                  newReactions = [...reactions, { emoji, users: [currentUser!.uid], count: 1 }];
+                  newReactions = [...reactions, { emoji, users: [currentUser.uid], count: 1 }];
               }
               return { ...msg, reactions: newReactions };
           }
@@ -1117,10 +1137,11 @@ useEffect(() => {
   
     const tempId = uuidv4();
     const isVideo = mediaFile.type.startsWith('video/');
+    const tempUrl = URL.createObjectURL(mediaFile);
     const optimisticStory: Story = {
       id: tempId,
       ownerId: currentUser.uid,
-      mediaUrl: URL.createObjectURL(mediaFile),
+      mediaUrl: tempUrl,
       mediaType: isVideo ? 'video' : 'image',
       caption,
       createdAt: new Date(),
@@ -1129,6 +1150,9 @@ useEffect(() => {
       reactions: [],
     };
     setStories(prev => [optimisticStory, ...prev]);
+
+    // Clean up URL object when story is uploaded or on error
+    const cleanup = () => URL.revokeObjectURL(tempUrl);
   
     let signal: { xhrAbort?: () => void } = {};
     try {
@@ -1192,7 +1216,7 @@ useEffect(() => {
   }, [toast]);
   
   const handleStoryReaction = useCallback(async (storyId: string, emoji: string) => {
-    if (!currentUser) return;
+    if (!currentUser?.uid) return;
     try {
       const storyRef = doc(db, 'stories', storyId);
       const reaction: StoryReaction = {
@@ -1229,8 +1253,11 @@ useEffect(() => {
   }, [selectedChat, currentUser, handleSendBase64File]);
 
   const handleBack = useCallback(() => {
+    if (selectedChat?.id === AI_USER_ID) {
+      setIsAiReplying(false);
+    }
     setSelectedChat(undefined);
-  }, []);
+  }, [selectedChat?.id]);
 
   const handleTyping = useCallback(async (isTyping: boolean) => {
     if (!selectedChat || !currentUser || selectedChat.id === AI_USER_ID) return;
@@ -1373,11 +1400,54 @@ useEffect(() => {
   }
 }
 
-type AppShellContextType = ReturnType<typeof useChatData>;
+interface AppShellContextType {
+  conversations: Conversation[];
+  selectedChat: Conversation | undefined;
+  isAiReplying: boolean;
+  allUsers: User[];
+  usersCache: Map<string, User>;
+  currentUser: User | undefined;
+  uploadProgress: Map<string, number>;
+  stories: Story[];
+  viewingStory: { user: User, stories: Story[] } | null;
+  setViewingStory: (story: { user: User, stories: Story[] } | null) => void;
+  usersWithStories: User[];
+  previewStoryFile: File | null;
+  setPreviewStoryFile: (file: File | null) => void;
+  aiConversation: Conversation;
+  messages: Message[];
+  loadMoreMessages: () => Promise<void>;
+  hasMoreMessages: boolean;
+  isLoadingMore: boolean;
+  handleViewStory: (user: User, stories: Story[]) => void;
+  handleCreateStory: (file: File, caption?: string) => Promise<void>;
+  handleStoryMarkAsViewed: (storyId: string) => Promise<void>;
+  handleDeleteStory: (storyId: string) => Promise<void>;
+  handleStoryReaction: (storyId: string, emoji: string) => Promise<void>;
+  handleChatSelect: (chatId: string) => Promise<void>;
+  activeSendMessage: (messageText: string, replyTo?: Message['replyTo']) => Promise<string>;
+  activeSendFile: (file: File, message: string) => Promise<string>;
+  activeSendBase64File: (base64: string, fileType: string, fileName: string, caption: string) => Promise<void>;
+  handleMessageAction: (messageId: string, action: 'react' | 'delete', data?: unknown) => Promise<void>;
+  cancelUpload: (messageId: string) => void;
+  handleCreateChat: (targetUser: User) => Promise<string>;
+  handleCreateGroupChat: (groupName: string, selectedUsers: User[]) => Promise<void>;
+  handleBack: () => void;
+  handleConversationAction: (conversationId: string, action: 'toggleFavorite' | 'archive' | 'unarchive') => Promise<void>;
+  handleTyping: (isTyping: boolean) => Promise<void>;
+  handleFriendAction: (targetUserId: string, action: 'sendRequest' | 'acceptRequest' | 'declineRequest' | 'removeFriend') => Promise<void>;
+  handleBlockUser: (targetUserId: string, isBlocked: boolean) => Promise<void>;
+  handleCreateStoryFromFile: (file: File, caption: string) => Promise<void>;
+  handleStoryReply: (story: Story, message: string) => Promise<void>;
+  handleMuteToggle: (conversationId: string) => Promise<void>;
+  handleClearChat: (conversationId: string) => Promise<void>;
+}
 
 const AppShellContext = createContext<AppShellContextType | undefined>(undefined);
 
-export function useAppShell() {
+export { AppShellContext };  // Export the context for use in other files
+
+export function useAppShell(): AppShellContextType {
   const context = useContext(AppShellContext);
   if (!context) {
     throw new Error('useAppShell must be used within an AppShell provider');
@@ -1407,12 +1477,12 @@ function AppBackground() {
   }
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children }: { children: React.ReactNode }): JSX.Element {
   const chatData = useChatData();
-  // DEBUG LOGGING
-  console.log('[AppShell Render] selectedChat:', chatData.selectedChat);
-  console.log('[AppShell Render] messages:', chatData.messages);
-  console.log('[AppShell Render] currentUser:', chatData.currentUser);
+  
+  // Setup presence and online status monitoring
+  usePresence(chatData.currentUser);
+  useOnlineStatus(chatData.currentUser);
   
   return (
     <AppShellContext.Provider value={chatData}>

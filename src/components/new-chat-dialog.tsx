@@ -47,7 +47,9 @@ export function NewChatDialog({ users, onCreateChat, onCreateGroupChat, children
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [groupName, setGroupName] = useState('');
   
-  const publicUsers = useMemo(() => users.filter(u => u.uid !== currentUser?.uid), [users, currentUser]);
+  const publicUsers = useMemo(() => users.filter(u => 
+    u.uid !== currentUser?.uid && !u.isPrivate
+  ), [users, currentUser]);
 
   const handleSearch = useCallback(async (term: string) => {
     if (!term.trim()) {
@@ -57,23 +59,26 @@ export function NewChatDialog({ users, onCreateChat, onCreateGroupChat, children
     }
     setIsSearching(true);
     try {
-        // Check if Firebase is properly configured (not using demo values)
-        const isFirebaseConfigured = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID && 
-                                    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== 'demo-project';
-        
-        if (isEmail(term) && isFirebaseConfigured) {
-            // Try Firebase search for email if properly configured
-            const usersRef = collection(db, 'users');
-            const q = query(usersRef, where('email', '==', term.toLowerCase()), limit(1));
-            const querySnapshot = await getDocs(q);
-            const foundUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+        if (isEmail(term)) {
+            // For email searches, check both private and public accounts
+            // Search directly in all users since we need to check private accounts too
+            const exactEmailUsers = users.filter(user => 
+                user.uid !== currentUser?.uid && 
+                !currentUser?.blockedUsers?.includes(user.uid) &&
+                user.email?.toLowerCase() === term.toLowerCase()
+            );
             
-            if (querySnapshot.empty) {
-               toast({ title: "User not found", description: "No user found with that exact email address.", variant: "destructive" });
+            setSearchResults(exactEmailUsers);
+            
+            if (exactEmailUsers.length === 0) {
+                toast({ 
+                    title: "User not found", 
+                    description: "No user found with that exact email address.", 
+                    variant: "destructive" 
+                });
             }
-            setSearchResults(foundUsers);
         } else {
-            // Fallback to client-side filtering for both email and name searches
+            // For non-email searches, only show public accounts
             const filtered = publicUsers.filter(user => {
                 const searchLower = term.toLowerCase();
                 return (user.name && user.name.toLowerCase().includes(searchLower)) ||
@@ -103,13 +108,15 @@ export function NewChatDialog({ users, onCreateChat, onCreateGroupChat, children
         
         toast({ 
             title: "Search completed", 
-            description: `Found ${filtered.length} users in local search.`, 
-            variant: "default" 
+            description: filtered.length > 0 ? `Found ${filtered.length} users in local search.` : 
+                        isEmail(searchTerm) ? 'No user found with that exact email address.' :
+                        'No users found matching your search.', 
+            variant: filtered.length > 0 ? "default" : "destructive" 
         });
     } finally {
         setIsSearching(false);
     }
-  }, [publicUsers, toast]);
+  }, [publicUsers, toast, searchTerm]);
 
 
   const displayedUsers = searchTerm ? searchResults : publicUsers;
