@@ -3,10 +3,8 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCreateUserWithEmailAndPassword, useUpdateProfile, useSignInWithGoogle } from 'react-firebase-hooks/auth';
-import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { GoogleAuthProvider, signInWithPopup, updateProfile as updateFirebaseProfile } from 'firebase/auth';
 import { useForm } from 'react-hook-form';
+import { authService } from '@/lib/auth-service';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import React, { useState } from 'react';
@@ -15,6 +13,11 @@ import { auth, db } from '@/lib/firebase';
 import { sendVerificationRequest, verifyEmailCode } from '@/utils/email-service';
 import { registerDeviceSecurely } from '@/utils/device-auth';
 import { Button } from '@/components/ui/button';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+// Separate import for react-firebase-hooks to avoid conflicts
+import { useCreateUserWithEmailAndPassword } from 'react-firebase-hooks/auth';
+import { useSignInWithGoogle } from 'react-firebase-hooks/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import {
   Card,
   CardContent,
@@ -48,9 +51,18 @@ const formSchema = z.object({
 export default function SignupPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [createUserWithEmailAndPassword, , loading] =
-    useCreateUserWithEmailAndPassword(auth);
-  const [signInWithGoogle, , googleLoading] = useSignInWithGoogle(auth);
+  const [
+    createUserWithEmailAndPasswordHook,
+    user,
+    loading,
+    error
+  ] = useCreateUserWithEmailAndPassword(auth!);
+  const [
+    signInWithGoogleHook,
+    googleUser,
+    googleLoading,
+    googleError
+  ] = useSignInWithGoogle(auth!);
   
   // Email verification states
   const [showVerification, setShowVerification] = useState(false);
@@ -119,72 +131,13 @@ export default function SignupPage() {
       }
 
       console.log('Creating account with:', verificationEmail);
-      // Create the account first
-      const userCredential = await createUserWithEmailAndPassword(
-        verificationEmail, 
-        formData.password
+      
+      // Create the account using the auth service
+      const user = await authService.createAccount(
+        verificationEmail,
+        formData.password,
+        formData.name
       );
-      
-      console.log('User credential:', userCredential);
-      
-      if (!userCredential?.user) {
-        console.error('No user credential returned');
-        throw new Error('Account creation failed - no user returned');
-      }
-
-      // Update profile with retries
-      let profileUpdateRetries = 3;
-      while (profileUpdateRetries > 0) {
-        try {
-          await updateFirebaseProfile(userCredential.user, { 
-            displayName: formData.name 
-          });
-          break;
-        } catch (profileError) {
-          console.error('Profile update attempt failed:', profileError);
-          profileUpdateRetries--;
-          if (profileUpdateRetries === 0) throw profileError;
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-      
-      // Create user document
-      const userDocRef = doc(db, 'users', userCredential.user.uid);
-      await setDoc(userDocRef, {
-        uid: userCredential.user.uid,
-        name: formData.name,
-        email: verificationEmail,
-        photoURL: null,
-        status: 'online',
-        about: '',
-        devices: [],
-        background: 'galaxy',
-        useCustomBackground: true,
-        friends: [],
-        friendRequestsSent: [],
-        friendRequestsReceived: [],
-        blockedUsers: [],
-        mutedConversations: [],
-        emailVerified: true,
-        verifiedAt: new Date(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      // Force token refresh with retries
-      let tokenRetries = 3;
-      while (tokenRetries > 0) {
-        try {
-          await userCredential.user.reload();
-          await userCredential.user.getIdToken(true);
-          break;
-        } catch (tokenError) {
-          console.error('Token refresh attempt failed:', tokenError);
-          tokenRetries--;
-          if (tokenRetries === 0) throw tokenError;
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
       
       toast({
         title: 'Account created!',
@@ -198,24 +151,54 @@ export default function SignupPage() {
 
     } catch (error: any) {
       console.error('Error during verification/signup:', error);
+      
+      // Attempt to clean up if we have a partial user creation
+      try {
+        if (auth?.currentUser) {
+          await auth.currentUser.delete();
+        }
+      } catch (cleanupError) {
+        console.error('Error during cleanup:', cleanupError);
+      }
+      
       let errorMessage = 'Failed to verify code or create account.';
+      let errorDetail = '';
       
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'An account with this email already exists.';
+        errorDetail = 'Please try logging in instead.';
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = 'The email address is not valid.';
+        errorDetail = 'Please check the email address and try again.';
       } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'The password is too weak. Please choose a stronger password.';
+        errorMessage = 'The password is too weak.';
+        errorDetail = 'Please choose a stronger password with at least 6 characters.';
+      } else if (error.code === 'auth/network-request-failed') {
+        errorMessage = 'Network connection error.';
+        errorDetail = 'Please check your internet connection and try again.';
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many attempts.';
+        errorDetail = 'Please wait a few minutes before trying again.';
+      } else if (error.message) {
+        errorDetail = error.message;
       }
       
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: errorDetail ? `${errorMessage} ${errorDetail}` : errorMessage,
         variant: 'destructive'
       });
       
       // Clear verification input on error
       setVerificationCodeInput('');
+      
+      // If it's a serious error, go back to the main signup form
+      if (error.code === 'auth/network-request-failed' || 
+          error.code === 'auth/too-many-requests' ||
+          error.message?.includes('failed - no user returned')) {
+        setShowVerification(false);
+      }
+      
     } finally {
       setIsVerifying(false);
     }
@@ -233,6 +216,9 @@ export default function SignupPage() {
         prompt: 'select_account'
       });
       
+      if (!auth) {
+        throw new Error('Authentication is not initialized');
+      }
       console.log('Starting Google signup...');
       const result = await signInWithPopup(auth, provider);
       console.log('Google signup result:', result);
@@ -334,7 +320,7 @@ export default function SignupPage() {
                 spellCheck="false"
                 placeholder="000000"
                   value={verificationCodeInput}
-                onChange={(e) => {
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   // Only allow numbers
                   const value = e.target.value.replace(/\D/g, '').slice(0, 6);
                   setVerificationCodeInput(value);
@@ -401,7 +387,7 @@ export default function SignupPage() {
               <FormField
                 control={form.control}
                 name="name"
-                render={({ field }) => (
+                render={({ field }: { field: any }) => (
                   <FormItem className="grid gap-2">
                     <FormLabel>Name</FormLabel>
                     <FormControl>

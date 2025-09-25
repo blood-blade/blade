@@ -2,16 +2,13 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useSignInWithEmailAndPassword, useSignInWithGoogle } from 'react-firebase-hooks/auth';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import React, { useState, useEffect } from 'react';
-import { doc, serverTimestamp, updateDoc, getDoc, setDoc } from 'firebase/firestore';
-import { GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
-
-import { auth, db } from '@/lib/firebase';
-import { registerDeviceSecurely } from '@/utils/device-auth';
+import { auth } from '@/lib/firebase';
+import { authService } from '@/lib/auth-service';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import {
   CardContent,
@@ -46,8 +43,8 @@ const formSchema = z.object({
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [signInWithEmailAndPassword, , loading, error] = useSignInWithEmailAndPassword(auth);
-  const [signInWithGoogle, , googleLoading] = useSignInWithGoogle(auth);
+  const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -58,68 +55,43 @@ export default function LoginPage() {
   });
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    console.log('Login attempt for email:', values.email);
+    setLoading(true);
+    
+    // Clear any existing error states
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('auth_error');
+      localStorage.removeItem('lastAuthError');
+    }
+    
     try {
-      const res = await signInWithEmailAndPassword(values.email, values.password);
-      console.log('Sign in result:', res);
-      
-      if (res) {
-        console.log('User signed in successfully:', res.user.uid);
-        
-        // Ensure user document exists with minimal data (devices handled by secure API)
-        const userDocRef = doc(db, 'users', res.user.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (!userDoc.exists()) {
-          console.log('Creating new user document');
-          // Create minimal user document if it doesn't exist
-          await setDoc(userDocRef, {
-            uid: res.user.uid,
-            email: res.user.email,
-            name: res.user.displayName || values.email.split('@')[0],
-            photoURL: res.user.photoURL || null,
-            status: 'online',
-            about: '',
-            devices: [], // Will be populated by secure device registration
-            background: 'galaxy',
-            useCustomBackground: true,
-            friends: [],
-            friendRequestsSent: [],
-            friendRequestsReceived: [],
-            blockedUsers: [],
-            mutedConversations: [],
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          console.log('Updating existing user status');
-          // Update status for existing user
-          await updateDoc(userDocRef, {
-            status: 'online',
-            updatedAt: serverTimestamp(),
-          });
-        }
-
-        // Register device securely after login
-        try {
-          const deviceResult = await registerDeviceSecurely(res.user);
-          if (!deviceResult.success) {
-            console.warn('Device registration failed:', deviceResult.error);
-            // Continue anyway - device registration failure shouldn't block login
-          }
-        } catch (deviceError) {
-          console.warn('Device registration error (continuing anyway):', deviceError);
-        }
-
-        console.log('Login successful, redirecting to home');
-        router.push('/');
+      // Clear any existing auth state first
+      if (auth.currentUser) {
+        await auth.signOut();
       }
+      
+      // Attempt to sign in
+      const user = await authService.signInWithEmail(values.email, values.password);
+      
+      if (!user) {
+        throw new Error('No user returned from sign in');
+      }
+      
+      // Verify the session is valid
+      const token = await user.getIdToken(true);
+      if (!token) {
+        throw new Error('Failed to obtain valid session token');
+      }
+      
+      // Success! Redirect to home
+      console.log('Login successful, redirecting to home');
+      router.push('/');
     } catch (e: any) {
         console.error("Login submission error:", e);
         console.error("Error code:", e.code);
         console.error("Error message:", e.message);
         
         let errorMessage = 'An unexpected error occurred. Please try again.';
+        form.reset();
         
         // Handle specific Firebase auth error codes
         switch (e.code) {
@@ -130,7 +102,43 @@ export default function LoginPage() {
             errorMessage = 'Incorrect password. Please check your password and try again.';
             break;
           case 'auth/invalid-credential':
-            errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+            console.error('Invalid credential error details:', e);
+            
+            // Clear all auth state
+            await auth.signOut();
+            
+            // Clear all storage
+            if (typeof window !== 'undefined') {
+              // Clear local/session storage
+              localStorage.clear();
+              sessionStorage.clear();
+              
+              // Clear IndexedDB
+              try {
+                const databases = await window.indexedDB.databases();
+                await Promise.all(
+                  databases
+                    .filter(db => db.name?.includes('firebase') && db.name)
+                    .map(db => window.indexedDB.deleteDatabase(db.name))
+                );
+              } catch (dbError) {
+                console.error('Error clearing IndexedDB:', dbError);
+              }
+              
+              // Clear cookies
+              document.cookie.split(';').forEach(c => {
+                document.cookie = c
+                  .replace(/^ +/, '')
+                  .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`);
+              });
+            }
+            
+            errorMessage = 'Your session has expired. Please try logging in again.';
+            
+            // Reload after a brief delay to ensure cleanup is complete
+            setTimeout(() => {
+              window.location.href = '/login';
+            }, 1500);
             break;
           case 'auth/invalid-email':
             errorMessage = 'Please enter a valid email address.';
@@ -155,6 +163,8 @@ export default function LoginPage() {
             description: errorMessage,
             variant: 'destructive',
         });
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -180,6 +190,11 @@ export default function LoginPage() {
         url: `${currentDomain}/reset-password`,
         handleCodeInApp: false, // We want to handle the reset in the web app, not mobile
       };
+
+      // Check if auth is initialized
+      if (!auth) {
+        throw new Error('Authentication is not initialized');
+      }
 
       // Use Firebase's built-in sendPasswordResetEmail method
       await sendPasswordResetEmail(auth, email, actionCodeSettings);
@@ -222,83 +237,126 @@ export default function LoginPage() {
   };
 
   const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    
+    // Clear any existing error states
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('auth_error');
+      localStorage.removeItem('lastAuthError');
+    }
+    
     try {
-      // Configure provider with proper settings
-      const provider = new GoogleAuthProvider();
-      provider.addScope('email');
-      provider.addScope('profile');
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
-      
-      console.log('Starting Google sign-in...');
-      const res = await signInWithPopup(auth, provider);
-      console.log('Google sign-in result:', res);
-      if (res) {
-        // Ensure user document exists with minimal data (devices handled by secure API)
-        const userDocRef = doc(db, 'users', res.user.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (!userDoc.exists()) {
-          // Create minimal user document for Google user
-          await setDoc(userDocRef, {
-            uid: res.user.uid,
-            email: res.user.email,
-            name: res.user.displayName || (res.user.email ? res.user.email.split('@')[0] : 'New User'),
-            photoURL: res.user.photoURL || null,
-            status: 'online',
-            about: '',
-            devices: [], // Will be populated by secure device registration
-            background: 'galaxy',
-            useCustomBackground: true,
-            friends: [],
-            friendRequestsSent: [],
-            friendRequestsReceived: [],
-            blockedUsers: [],
-            mutedConversations: [],
-            emailVerified: true, // Google accounts are pre-verified
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          // Update status for existing user
-          await updateDoc(userDocRef, {
-            status: 'online',
-            updatedAt: serverTimestamp(),
-          });
-        }
-
-        // Register device securely after Google login
-        const deviceResult = await registerDeviceSecurely(res.user);
-        if (!deviceResult.success) {
-          console.warn('Device registration failed:', deviceResult.error);
-          // Continue anyway - device registration failure shouldn't block login
-        }
-
-        router.push('/');
+      // Clear existing auth state first
+      if (auth.currentUser) {
+        await auth.signOut();
+        // Wait for auth state to clear
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-    } catch (e: any) {
-        console.error("Google Sign-In error:", e);
-        let errorMessage = 'An unexpected error occurred. Please try again.';
-        if (e.code === 'auth/popup-closed-by-user') {
-            errorMessage = 'Google sign-in was cancelled.';
-        } else if (e.message) {
-            errorMessage = e.message;
-        }
+      
+      // Prevent automatic reload
+      if (typeof window !== 'undefined') {
+        window.onbeforeunload = (e) => {
+          e.preventDefault();
+          e.returnValue = '';
+        };
+      }
+
+      const user = await authService.signInWithGoogle();
+      
+      // If user is null, it means we're being redirected
+      if (!user) {
+        // Show loading message since we're about to redirect
         toast({
-            title: 'Error signing in with Google',
-            description: errorMessage,
-            variant: 'destructive',
+          title: 'Redirecting to Google',
+          description: 'Please complete sign in with Google...',
         });
+        return; // Don't continue since we're being redirected
+      }
+
+      // Re-enable automatic reload after successful login
+      if (typeof window !== 'undefined') {
+        window.onbeforeunload = null;
+      }
+    
+      console.log('Google sign-in successful:', user.uid);
+      router.push('/');
+    } catch (e: any) {
+      // Re-enable automatic reload on error
+      if (typeof window !== 'undefined') {
+        window.onbeforeunload = null;
+      }
+
+      console.error("Google Sign-In error:", {
+        error: e,
+        code: e.code,
+        message: e.message,
+        stack: e.stack
+      });
+      let errorMessage = 'An unexpected error occurred. Please try again.';
+      
+      switch (e.code) {
+        case 'auth/popup-closed-by-user':
+          errorMessage = 'Google sign-in was cancelled. Please try again.';
+          break;
+        case 'auth/popup-blocked':
+          errorMessage = 'Popup was blocked. Please allow popups for this site and try again.';
+          break;
+        case 'auth/invalid-credential':
+          errorMessage = 'Sign-in failed. Please clear your browser cache and try again.';
+          // Clear auth state for next attempt
+          if (auth) {
+            await auth.signOut();
+          }
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+          break;
+        case 'auth/cancelled-popup-request':
+          errorMessage = 'Another popup is already open. Please close it and try again.';
+          break;
+        case 'auth/argument-error':
+          // Clear all storage and reload
+          if (typeof window !== 'undefined') {
+            localStorage.clear();
+            sessionStorage.clear();
+            // Clear IndexedDB
+            try {
+              const databases = await window.indexedDB.databases();
+              await Promise.all(
+                databases
+                  .filter(db => db.name?.includes('firebase'))
+                  .map(db => window.indexedDB.deleteDatabase(db.name || ''))
+              );
+            } catch (dbError) {
+              console.error('Error clearing IndexedDB:', dbError);
+            }
+          }
+          errorMessage = 'Authentication error. Please try again after the page reloads.';
+          setTimeout(() => window.location.reload(), 1500);
+          break;
+        default:
+          if (e.message) {
+            errorMessage = e.message;
+          }
+      }
+      
+      toast({
+        title: 'Error signing in with Google',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
+  // Cleanup loading states when component unmounts
   useEffect(() => {
-    if (error) {
-      console.error('Firebase auth hook error:', error);
-      // Error handling is now done in onSubmit for better control
-    }
-  }, [error]);
+    return () => {
+      setLoading(false);
+      setGoogleLoading(false);
+    };
+  }, []);
 
 
   return (

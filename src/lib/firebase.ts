@@ -1,73 +1,16 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { setDoc } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { setDoc } from 'firebase/firestore';
+import { firebaseApp, firebaseAuth } from './firebase-init';
 
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_MEASUREMENT_ID
-};
+// Export initialized auth
+export const auth = firebaseAuth;
+export const app = firebaseApp;
 
-// Validate required Firebase config
-const requiredConfig = ['apiKey', 'authDomain', 'projectId', 'appId'];
-const missingConfig = requiredConfig.filter(key => !firebaseConfig[key as keyof typeof firebaseConfig]);
-
-if (missingConfig.length > 0) {
-  console.error('Missing Firebase configuration:', missingConfig);
-  console.error('Current config values:', {
-    apiKey: firebaseConfig.apiKey ? 'SET' : 'MISSING',
-    authDomain: firebaseConfig.authDomain ? 'SET' : 'MISSING',
-    projectId: firebaseConfig.projectId ? 'SET' : 'MISSING',
-    appId: firebaseConfig.appId ? 'SET' : 'MISSING',
-  });
-  throw new Error(`Missing Firebase configuration: ${missingConfig.join(', ')}. Please check your environment variables.`);
-}
-
-// Debug configuration loading
-console.log('Firebase config loading:', {
-  hasApiKey: !!firebaseConfig.apiKey,
-  hasAuthDomain: !!firebaseConfig.authDomain,
-  hasProjectId: !!firebaseConfig.projectId,
-  authDomain: firebaseConfig.authDomain,
-  currentDomain: typeof window !== 'undefined' ? window.location.hostname : 'server',
-  apiKeyPrefix: firebaseConfig.apiKey?.substring(0, 5),
+// Log initialization status
+console.log('Firebase initialization status:', {
+  appInitialized: !!app,
+  authInitialized: !!auth
 });
-
-// Validate API key format
-if (firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith('AIza')) {
-  console.error('Invalid Firebase API key format. API key should start with "AIza"');
-  throw new Error('Invalid Firebase API key format');
-}
-
-// Log current domain for debugging
-if (typeof window !== 'undefined') {
-  console.log('Current domain:', window.location.hostname);
-  console.log('Current origin:', window.location.origin);
-}
-
-// Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-console.log('Firebase app initialized successfully');
-
-// Initialize Firebase Auth with persistence
-import { setPersistence, browserLocalPersistence } from 'firebase/auth';
-export const auth = getAuth(app);
-
-// Set persistence to LOCAL (survives browser restarts)
-setPersistence(auth, browserLocalPersistence)
-  .then(() => {
-    console.log('Firebase Auth persistence set to LOCAL');
-  })
-  .catch((error) => {
-    console.error('Error setting auth persistence:', error);
-  });
 
 // Configure auth for Replit domains
 if (typeof window !== 'undefined') {

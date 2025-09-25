@@ -33,24 +33,71 @@ function LoadingScreen() {
   );
 }
 
+// Validate session
+function validateSession(user: User | null): boolean {
+  if (!user) return false;
+  
+  const lastLogin = localStorage.getItem('lastLogin');
+  const sessionUser = localStorage.getItem('sessionUser');
+  
+  if (!lastLogin || !sessionUser) return false;
+  if (sessionUser !== user.uid) return false;
+  
+  // Check if session is within 7 days
+  const loginTime = parseInt(lastLogin, 10);
+  const now = Date.now();
+  const sessionAge = now - loginTime;
+  const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+  
+  return sessionAge < maxAge;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, authLoading, error] = useAuthState(auth);
-  const [isProcessingRedirect, setIsProcessingRedirect] = useState(true);
+  const [isProcessingRedirect, setIsProcessingRedirect] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
 
   // Navigation state management
   const navigationInProgress = useRef(false);
   const lastRedirectTime = useRef(Date.now());
-  const REDIRECT_COOLDOWN = 2000; // 2 seconds cooldown between redirects
+  const REDIRECT_COOLDOWN = 1000; // 1 second cooldown between redirects
   const VERIFICATION_CHECK_COOLDOWN = 5000; // 5 seconds between verification checks
-
+  
+  // Initialize Firebase auth state
   useEffect(() => {
-    // Check for redirect result on initial load
-    getRedirectResult(auth)
-      .finally(() => {
-        setIsProcessingRedirect(false);
-      });
+    const clearAuthState = () => {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('lastLogin');
+        localStorage.removeItem('sessionUser');
+        // Clear IndexedDB auth data
+        const req = indexedDB.deleteDatabase('firebaseLocalStorageDb');
+        req.onsuccess = () => console.log('Cleared IndexedDB auth data');
+      }
+    };
+
+    // Attempt to restore auth state, clear if invalid
+    if (auth.currentUser && !validateSession(auth.currentUser)) {
+      clearAuthState();
+      auth.signOut().catch(console.error);
+    }
+
+    // Check for redirect result only if we expect one
+    const pendingRedirect = sessionStorage.getItem('expectingRedirect');
+    if (pendingRedirect) {
+      setIsProcessingRedirect(true);
+      getRedirectResult(auth)
+        .catch((error) => {
+          console.error('Error processing redirect:', error);
+          if (error.code === 'auth/argument-error') {
+            clearAuthState();
+          }
+        })
+        .finally(() => {
+          sessionStorage.removeItem('expectingRedirect');
+          setIsProcessingRedirect(false);
+        });
+    }
   }, []);
 
   useEffect(() => {
@@ -63,6 +110,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Prevent rapid redirects
       const now = Date.now();
       if (now - lastRedirectTime.current < REDIRECT_COOLDOWN) {
+        return;
+      }
+
+      // Early return if we can't determine auth state yet
+      if (auth.currentUser === null && !user && !authLoading) {
+        console.log('Auth state undetermined, redirecting to login');
+        if (!isAuthRoute) {
+          lastRedirectTime.current = now;
+          navigationInProgress.current = true;
+          router.replace('/login');
+          setTimeout(() => { navigationInProgress.current = false; }, 100);
+        }
         return;
       }
 
@@ -159,13 +218,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isLoading = authLoading || isProcessingRedirect;
   const isAuthRoute = AUTH_ROUTES.includes(pathname || '');
 
-  // Show loading screen if we're still loading or if we're about to redirect
-  if (isLoading || (!user && !isAuthRoute) || (user && isAuthRoute)) {
+  // Only show loading screen during initial auth check
+  if (isLoading && !navigationInProgress.current) {
     return <LoadingScreen />;
   }
 
+  // Don't render children until auth is initialized
+  if (!auth) {
+    return null;
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading: authLoading, error, signOut, auth }}>
+    <AuthContext.Provider value={{ user: user ?? null, loading: authLoading, error, signOut, auth }}>
       {children}
     </AuthContext.Provider>
   );

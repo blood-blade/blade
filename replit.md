@@ -1,4 +1,4 @@
-# Vibez - Social Messaging App
+# Vibez - By Invincible
 
 ## Overview
 This is a Next.js social messaging application with Firebase authentication, AI chat features, stories, and real-time messaging capabilities. The app has been successfully imported and configured to run in the Replit environment.
