@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
 import { auth as firebaseAuth, db } from './firebase';
+import { setupPresence, setOfflineStatus } from './presence-final';
 
 // Ensure auth is defined
 const auth = firebaseAuth!;
@@ -31,7 +32,7 @@ export const authService = {
   /**
    * Create a new user account
    */
-    async createAccount(email: string, password: string, name?: string) {
+  async createAccount(email: string, password: string, name?: string) {
     try {
       // Clear any existing sessions
       await auth.signOut();
@@ -96,77 +97,6 @@ export const authService = {
         await auth.signOut();
         // Clear any persisted auth data
         if (typeof window !== 'undefined') {
-          try {
-            // Validate Firebase config
-            if (!auth) {
-              throw new Error('Firebase Auth is not initialized');
-            }
-
-            // Clear any existing auth state first
-            if (auth.currentUser) {
-              await auth.signOut();
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
-
-            // Use default GoogleAuthProvider
-            const provider = new GoogleAuthProvider();
-
-            // Only add basic scopes
-            provider.addScope('profile');
-            provider.addScope('email');
-
-            // Sign in with popup
-            const result = await firebaseSignInPopup(auth, provider);
-
-            if (!result?.user) {
-              throw new AuthError('No user returned from Google sign in', 'auth/google-sign-in-failed');
-            }
-
-            // Validate the authentication result
-            const token = await result.user.getIdToken(true);
-            if (!token) {
-              throw new AuthError('Session validation failed', 'auth/invalid-session');
-            }
-
-            // Check if user document exists
-            const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-            if (!userDoc.exists()) {
-              await setDoc(doc(db, 'users', result.user.uid), {
-                uid: result.user.uid,
-                email: result.user.email,
-                name: result.user.displayName || result.user.email?.split('@')[0] || 'User',
-                photoURL: result.user.photoURL,
-                status: 'online',
-                about: '',
-                devices: [],
-                background: 'galaxy',
-                useCustomBackground: true,
-                friends: [],
-                friendRequestsSent: [],
-                friendRequestsReceived: [],
-                blockedUsers: [],
-                mutedConversations: [],
-                emailVerified: true,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-              });
-            } else {
-              await updateDoc(doc(db, 'users', result.user.uid), {
-                status: 'online',
-                lastSeen: serverTimestamp()
-              });
-            }
-
-            return result.user;
-          } catch (error: any) {
-            console.error('Google sign in error:', error);
-            throw new AuthError(
-              error.message || 'Failed to sign in with Google',
-              error.code || 'auth/unknown'
-            );
-          }
-        // Clear any persisted auth data
-        if (typeof window !== 'undefined') {
           localStorage.removeItem('lastLogin');
           localStorage.removeItem('sessionUser');
           // Clear IndexedDB auth data
@@ -183,6 +113,37 @@ export const authService = {
         }
         // Wait for auth state to clear
         await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Attempt sign in
+      const userCredential = await firebaseSignIn(auth, email, password);
+      
+      if (!userCredential?.user) {
+        throw new AuthError('Failed to sign in', 'auth/sign-in-failed');
+      }
+
+      // Setup presence system
+      await setupPresence(userCredential.user.uid);
+
+      return userCredential.user;
+    } catch (error: any) {
+      console.error('Sign in error:', error);
+      throw new AuthError(
+        error.message || 'Failed to sign in',
+        error.code || 'auth/unknown'
+      );
+    }
+  },
+
+  /**
+   * Sign in with Google
+   */
+  async signInWithGoogle() {
+    try {
+      // Clear any existing auth state first
+      if (auth.currentUser) {
+        await auth.signOut();
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       // Initialize Google Auth Provider
@@ -244,10 +205,7 @@ export const authService = {
         });
       } else {
         // Update online status
-        await updateDoc(doc(db, 'users', result.user.uid), {
-          status: 'online',
-          lastSeen: serverTimestamp()
-        });
+        await setupPresence(result.user.uid);
       }
       
       return result.user;
