@@ -224,81 +224,87 @@ export const authService = {
       let userDoc;
       try {
         userDoc = await getDoc(doc(db, 'users', result.user.uid));
-      
-      if (!userDoc.exists()) {
-        // Create new user document
-        await setDoc(doc(db, 'users', result.user.uid), {
-          uid: result.user.uid,
-          email: result.user.email ?? '',
-          name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
-          photoURL: result.user.photoURL ?? '',
-          status: 'online',
-          about: '',
-          devices: [],
-          background: 'galaxy',
-          useCustomBackground: true,
-          friends: [],
-          friendRequestsSent: [],
-          friendRequestsReceived: [],
-          blockedUsers: [],
-          mutedConversations: [],
-          emailVerified: true,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        // Update online status
-        await setupPresence(result.user.uid);
+        
+        if (!userDoc.exists()) {
+          // Create new user document
+          await setDoc(doc(db, 'users', result.user.uid), {
+            uid: result.user.uid,
+            email: result.user.email ?? '',
+            name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
+            photoURL: result.user.photoURL ?? '',
+            status: 'online',
+            about: '',
+            devices: [],
+            background: 'galaxy',
+            useCustomBackground: true,
+            friends: [],
+            friendRequestsSent: [],
+            friendRequestsReceived: [],
+            blockedUsers: [],
+            mutedConversations: [],
+            emailVerified: true,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // Update online status
+          await setupPresence(result.user.uid);
+        }
+        
+        return result.user;
+      } catch (error: any) {
+        logDebug('Google sign-in error:', { code: error.code, message: error.message });
+        
+        // Handle specific error cases
+        let errorMessage = 'Failed to sign in with Google';
+        let errorCode = error.code || 'auth/unknown';
+        
+        switch (error.code) {
+          case 'auth/popup-blocked':
+            errorMessage = 'Sign-in popup was blocked. Please allow popups for this site and try again.';
+            break;
+          case 'auth/popup-closed-by-user':
+            errorMessage = 'Sign-in was cancelled. Please try again and complete the Google sign-in.';
+            break;
+          case 'auth/cancelled-popup-request':
+            errorMessage = 'Only one sign-in window can be open at a time. Please try again.';
+            break;
+          case 'auth/network-request-failed':
+            errorMessage = 'Network error. Please check your internet connection and try again.';
+            break;
+          case 'auth/invalid-credential':
+            errorMessage = 'The sign-in credential was invalid. Please try again.';
+            // Try to clear corrupted credentials
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.clear();
+                sessionStorage.clear();
+              } catch (e) {
+                console.warn('Failed to clear storage:', e);
+              }
+            }
+            break;
+        }
+
+        // Clean up any pending auth state
+        try {
+          await auth.signOut();
+        } catch (e) {
+          console.warn('Failed to clean up auth state:', e);
+        }
+
+        throw new AuthError(
+          error.message || errorMessage,
+          errorCode
+        );
       }
-      
-      return result.user;
     } catch (error: any) {
       logDebug('Google sign-in error:', { code: error.code, message: error.message });
-      
-      // Handle specific error cases
-      let errorMessage = 'Failed to sign in with Google';
-      let errorCode = error.code || 'auth/unknown';
-      
-      switch (error.code) {
-        case 'auth/popup-blocked':
-          errorMessage = 'Sign-in popup was blocked. Please allow popups for this site and try again.';
-          break;
-        case 'auth/popup-closed-by-user':
-          errorMessage = 'Sign-in was cancelled. Please try again and complete the Google sign-in.';
-          break;
-        case 'auth/cancelled-popup-request':
-          errorMessage = 'Only one sign-in window can be open at a time. Please try again.';
-          break;
-        case 'auth/network-request-failed':
-          errorMessage = 'Network error. Please check your internet connection and try again.';
-          break;
-        case 'auth/invalid-credential':
-          errorMessage = 'The sign-in credential was invalid. Please try again.';
-          // Try to clear corrupted credentials
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.clear();
-              sessionStorage.clear();
-            } catch (e) {
-              console.warn('Failed to clear storage:', e);
-            }
-          }
-          break;
-      }
-
-      // Clean up any pending auth state
-      try {
-        await auth.signOut();
-      } catch (e) {
-        console.warn('Failed to clean up auth state:', e);
-      }
-
       throw new AuthError(
-        error.message || errorMessage,
-        errorCode
+        error.message || 'Failed to sign in with Google',
+        error.code || 'auth/unknown'
       );
     }
-  },
   },
 
   /**
