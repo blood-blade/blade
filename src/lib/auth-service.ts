@@ -140,13 +140,33 @@ export const authService = {
    */
   async signInWithGoogle() {
     try {
+      logDebug('Starting Google sign-in process');
+
       // Clear any existing auth state first
       if (auth.currentUser) {
+        logDebug('Clearing existing auth state');
         await auth.signOut();
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Clear any persisted auth data
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('lastLogin');
+          localStorage.removeItem('sessionUser');
+          // Clear IndexedDB auth data
+          try {
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+              if (db.name?.includes('firebase') && db.name) {
+                await window.indexedDB.deleteDatabase(db.name);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to clear IndexedDB:', e);
+          }
+        }
+        // Wait for auth state to clear completely
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
-      // Initialize Google Auth Provider
+      // Initialize Google Auth Provider with error handling
       logDebug('Initializing Google Auth Provider');
       const provider = new GoogleAuthProvider();
       
@@ -154,33 +174,56 @@ export const authService = {
       provider.addScope('profile');
       provider.addScope('email');
       
-      // Set minimal custom parameters
+      // Set custom parameters for better UX
       provider.setCustomParameters({
-        prompt: 'select_account'
+        prompt: 'select_account',
+        auth_type: 'reauthenticate'
       });
       
       logDebug('Google Auth Provider configured');
       
-      // Attempt sign in with popup
+      // Attempt sign in with popup with improved error handling
       logDebug('Attempting Google sign-in with popup');
-      const result = await firebaseSignInPopup(auth, provider);
+      const result = await firebaseSignInPopup(auth, provider).catch(error => {
+        logDebug('Popup sign-in failed, error:', error);
+        throw error;
+      });
       
       if (!result?.user) {
+        logDebug('No user returned from Google sign-in');
         throw new AuthError('No user returned from Google sign in', 'auth/google-sign-in-failed');
       }
+
+      logDebug('Google sign-in successful, validating session');
       
-      // Validate the authentication result
-      try {
-        const token = await result.user.getIdToken(true);
-        if (!token) {
-          throw new Error('Failed to obtain valid token');
+      // Validate the authentication result with retries
+      let token = null;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          token = await result.user.getIdToken(true);
+          if (token) break;
+          retries--;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (e) {
+          logDebug('Token fetch failed, retries left:', retries);
+          retries--;
+          if (retries === 0) throw e;
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
-      } catch (e) {
-        throw new AuthError('Session validation failed', 'auth/invalid-session');
       }
       
-      // Check if user document exists
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+      if (!token) {
+        logDebug('Failed to obtain valid token after retries');
+        throw new AuthError('Session validation failed', 'auth/invalid-session');
+      }
+
+      logDebug('Session validated, checking user document');
+      
+      // Check if user document exists with retry
+      let userDoc;
+      try {
+        userDoc = await getDoc(doc(db, 'users', result.user.uid));
       
       if (!userDoc.exists()) {
         // Create new user document
@@ -210,12 +253,52 @@ export const authService = {
       
       return result.user;
     } catch (error: any) {
-      console.error('Google sign in error:', error);
+      logDebug('Google sign-in error:', { code: error.code, message: error.message });
+      
+      // Handle specific error cases
+      let errorMessage = 'Failed to sign in with Google';
+      let errorCode = error.code || 'auth/unknown';
+      
+      switch (error.code) {
+        case 'auth/popup-blocked':
+          errorMessage = 'Sign-in popup was blocked. Please allow popups for this site and try again.';
+          break;
+        case 'auth/popup-closed-by-user':
+          errorMessage = 'Sign-in was cancelled. Please try again and complete the Google sign-in.';
+          break;
+        case 'auth/cancelled-popup-request':
+          errorMessage = 'Only one sign-in window can be open at a time. Please try again.';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+          break;
+        case 'auth/invalid-credential':
+          errorMessage = 'The sign-in credential was invalid. Please try again.';
+          // Try to clear corrupted credentials
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.clear();
+              sessionStorage.clear();
+            } catch (e) {
+              console.warn('Failed to clear storage:', e);
+            }
+          }
+          break;
+      }
+
+      // Clean up any pending auth state
+      try {
+        await auth.signOut();
+      } catch (e) {
+        console.warn('Failed to clean up auth state:', e);
+      }
+
       throw new AuthError(
-        error.message || 'Failed to sign in with Google',
-        error.code || 'auth/unknown'
+        error.message || errorMessage,
+        errorCode
       );
     }
+  },
   },
 
   /**
