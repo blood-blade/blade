@@ -264,21 +264,18 @@ export const authService = {
         userDoc = await getDoc(doc(db, 'users', result.user.uid));
         
         if (!userDoc.exists()) {
-          // Get fresh user data
-          const freshUserData = await getDoc(doc(db, 'users', result.user.uid));
-          if (!freshUserData.exists()) {
-            // Create new user document
-            await setDoc(doc(db, 'users', result.user.uid), {
-              uid: result.user.uid,
-              email: result.user.email ?? '',
-              name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
-              photoURL: result.user.photoURL ?? '',
-              status: 'online',
-              about: '',
-              devices: [],
-              background: 'default',
-              useCustomBackground: false,
-              friends: [],
+          // Create new user document
+          await setDoc(doc(db, 'users', result.user.uid), {
+            uid: result.user.uid,
+            email: result.user.email ?? '',
+            name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
+            photoURL: result.user.photoURL ?? '',
+            status: 'online',
+            about: '',
+            devices: [],
+            background: 'default',
+            useCustomBackground: false,
+            friends: [],
             friendRequestsSent: [],
             friendRequestsReceived: [],
             blockedUsers: [],
@@ -287,10 +284,10 @@ export const authService = {
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
-        } else {
-          // Update online status
-          await setupPresence(result.user.uid);
         }
+        
+        // Update online status
+        await setupPresence(result.user.uid);
         
         return result.user;
       } catch (error: any) {
@@ -334,10 +331,7 @@ export const authService = {
           console.warn('Failed to clean up auth state:', e);
         }
 
-        throw new AuthError(
-          error.message || errorMessage,
-          errorCode
-        );
+        throw new AuthError(error.message || errorMessage, errorCode);
       }
     } catch (error: any) {
       logDebug('Google sign-in error:', { code: error.code, message: error.message });
