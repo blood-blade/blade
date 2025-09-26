@@ -146,25 +146,42 @@ export const authService = {
       if (auth.currentUser) {
         logDebug('Clearing existing auth state');
         await auth.signOut();
-        // Clear any persisted auth data
-        if (typeof window !== 'undefined') {
+      }
+
+      // Clear any persisted auth data regardless of current user
+      if (typeof window !== 'undefined') {
+        try {
+          // Clear local storage
           localStorage.removeItem('lastLogin');
           localStorage.removeItem('sessionUser');
-          // Clear IndexedDB auth data
-          try {
-            const dbs = await window.indexedDB.databases();
-            for (const db of dbs) {
-              if (db.name?.includes('firebase') && db.name) {
-                await window.indexedDB.deleteDatabase(db.name);
-              }
+          localStorage.removeItem('firebase:host:*');
+          
+          // Clear session storage
+          sessionStorage.clear();
+          
+          // Clear IndexedDB
+          const dbs = await window.indexedDB.databases();
+          for (const db of dbs) {
+            if (db.name?.includes('firebase') && db.name) {
+              await window.indexedDB.deleteDatabase(db.name);
             }
-          } catch (e) {
-            console.warn('Failed to clear IndexedDB:', e);
           }
+
+          // Clear cookies related to Firebase auth
+          document.cookie.split(';').forEach(c => {
+            if (c.includes('firebase')) {
+              document.cookie = c
+                .replace(/^ +/, '')
+                .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`);
+            }
+          });
+        } catch (e) {
+          console.warn('Failed to clear some browser data:', e);
         }
-        // Wait for auth state to clear completely
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
+
+      // Wait for cleanup to take effect
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Initialize Google Auth Provider with error handling
       logDebug('Initializing Google Auth Provider');
@@ -177,17 +194,35 @@ export const authService = {
       // Set custom parameters for better UX
       provider.setCustomParameters({
         prompt: 'select_account',
-        auth_type: 'reauthenticate'
+        auth_type: 'reauthenticate',
+        include_granted_scopes: 'true'
       });
       
       logDebug('Google Auth Provider configured');
       
       // Attempt sign in with popup with improved error handling
       logDebug('Attempting Google sign-in with popup');
-      const result = await firebaseSignInPopup(auth, provider).catch(error => {
-        logDebug('Popup sign-in failed, error:', error);
-        throw error;
-      });
+      let result;
+      try {
+        result = await firebaseSignInPopup(auth, provider);
+      } catch (popupError: any) {
+        logDebug('Popup sign-in failed, trying redirect...', popupError);
+        
+        // If popup fails, try redirect method
+        if (popupError.code === 'auth/popup-blocked' || 
+            popupError.code === 'auth/popup-closed-by-user' ||
+            popupError.code === 'auth/cancelled-popup-request') {
+          
+          // Store a flag that we're expecting a redirect
+          sessionStorage.setItem('expectingRedirect', 'true');
+          
+          // Attempt redirect sign in
+          await signInWithRedirect(auth, provider);
+          return null; // Function will return here, user will be redirected
+        }
+        
+        throw popupError;
+      }
       
       if (!result?.user) {
         logDebug('No user returned from Google sign-in');
@@ -223,21 +258,27 @@ export const authService = {
       // Check if user document exists with retry
       let userDoc;
       try {
+        // Force token refresh before accessing Firestore
+        await result.user.getIdToken(true);
+        
         userDoc = await getDoc(doc(db, 'users', result.user.uid));
         
         if (!userDoc.exists()) {
-          // Create new user document
-          await setDoc(doc(db, 'users', result.user.uid), {
-            uid: result.user.uid,
-            email: result.user.email ?? '',
-            name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
-            photoURL: result.user.photoURL ?? '',
-            status: 'online',
-            about: '',
-            devices: [],
-            background: 'default',
-            useCustomBackground: false,
-            friends: [],
+          // Get fresh user data
+          const freshUserData = await getDoc(doc(db, 'users', result.user.uid));
+          if (!freshUserData.exists()) {
+            // Create new user document
+            await setDoc(doc(db, 'users', result.user.uid), {
+              uid: result.user.uid,
+              email: result.user.email ?? '',
+              name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
+              photoURL: result.user.photoURL ?? '',
+              status: 'online',
+              about: '',
+              devices: [],
+              background: 'default',
+              useCustomBackground: false,
+              friends: [],
             friendRequestsSent: [],
             friendRequestsReceived: [],
             blockedUsers: [],
