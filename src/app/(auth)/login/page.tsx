@@ -118,7 +118,8 @@ export default function LoginPage() {
                 const databases = await window.indexedDB.databases();
                 await Promise.all(
                   databases
-                    .filter(db => db.name?.includes('firebase') && db.name)
+                    .filter(db => db.name?.includes('firebase'))
+                    .filter((db): db is { name: string } => db.name !== undefined)
                     .map(db => window.indexedDB.deleteDatabase(db.name))
                 );
               } catch (dbError) {
@@ -191,10 +192,17 @@ export default function LoginPage() {
         handleCodeInApp: false, // We want to handle the reset in the web app, not mobile
       };
 
-      // Check if auth is initialized
+      // Ensure auth is properly initialized
       if (!auth) {
         throw new Error('Authentication is not initialized');
       }
+      
+      // Log auth configuration for debugging
+      console.log('Auth configuration:', {
+        isInitialized: !!auth,
+        hasAuthDomain: !!auth.config?.authDomain,
+        currentDomain: window.location.hostname
+      });
 
       // Use Firebase's built-in sendPasswordResetEmail method
       await sendPasswordResetEmail(auth, email, actionCodeSettings);
@@ -475,7 +483,7 @@ export default function LoginPage() {
                     (loading || googleLoading) && "pointer-events-none opacity-50"
                   )}
                   aria-disabled={loading || googleLoading}
-                  tabIndex={(loading || googleLoading) ? -1 : undefined}
+                  tabIndex={loading || googleLoading ? -1 : 0}
                 >
                   Sign up
                 </Link>

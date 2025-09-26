@@ -61,8 +61,8 @@ export const authService = {
         status: 'online',
         about: '',
         devices: [],
-        background: 'default',
-        useCustomBackground: false,
+        background: 'galaxy',
+        useCustomBackground: true,
         friends: [],
         friendRequestsSent: [],
         friendRequestsReceived: [],
@@ -141,12 +141,24 @@ export const authService = {
   async signInWithGoogle() {
     try {
       logDebug('Starting Google sign-in process');
+      console.log('Firebase auth state:', {
+        isInitialized: !!auth,
+        hasCurrentUser: !!auth.currentUser,
+        isPersistenceSet: auth.persistence
+      });
 
       // Clear any existing auth state first
       if (auth.currentUser) {
         logDebug('Clearing existing auth state');
         await auth.signOut();
       }
+
+      // Log Firebase config status
+      console.log('Firebase config:', {
+        hasAuth: !!auth,
+        authDomain: auth.config.authDomain,
+        apiKey: auth.config.apiKey
+      });
 
       // Clear any persisted auth data regardless of current user
       if (typeof window !== 'undefined') {
@@ -192,10 +204,18 @@ export const authService = {
       provider.addScope('email');
       
       // Set custom parameters for better UX
+      // Ensure we're using the correct auth domain
+      const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
+      if (!auth.config.authDomain) {
+        throw new Error('Firebase auth domain is not configured');
+      }
+      
       provider.setCustomParameters({
         prompt: 'select_account',
         auth_type: 'reauthenticate',
-        include_granted_scopes: 'true'
+        include_granted_scopes: 'true',
+        login_hint: '',  // Clear any previous login hints
+        domain_hint: currentDomain // Help with domain matching
       });
       
       logDebug('Google Auth Provider configured');
@@ -204,8 +224,19 @@ export const authService = {
       logDebug('Attempting Google sign-in with popup');
       let result;
       try {
+        console.log('Attempting popup sign-in with Google provider');
         result = await firebaseSignInPopup(auth, provider);
+        console.log('Popup sign-in result:', {
+          success: !!result,
+          hasUser: !!result?.user,
+          errorCode: result?.user ? null : 'no_user'
+        });
       } catch (popupError: any) {
+        console.error('Popup sign-in failed:', {
+          code: popupError.code,
+          message: popupError.message,
+          stack: popupError.stack
+        });
         logDebug('Popup sign-in failed, trying redirect...', popupError);
         
         // If popup fails, try redirect method
