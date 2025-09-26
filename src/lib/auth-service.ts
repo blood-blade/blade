@@ -144,8 +144,17 @@ export const authService = {
       console.log('Firebase auth state:', {
         isInitialized: !!auth,
         hasCurrentUser: !!auth.currentUser,
-        isPersistenceSet: auth.persistence
+        isPersistenceSet: auth.persistence,
+        currentURL: typeof window !== 'undefined' ? window.location.href : 'not-browser',
+        currentHostname: typeof window !== 'undefined' ? window.location.hostname : 'not-browser'
       });
+
+      // Check if we're returning from a redirect
+      const isReturningFromRedirect = typeof window !== 'undefined' && sessionStorage.getItem('expectingRedirect') === 'true';
+      if (isReturningFromRedirect) {
+        logDebug('Detected return from redirect flow');
+        sessionStorage.removeItem('expectingRedirect');
+      }
 
       // Clear any existing auth state first
       if (auth.currentUser) {
@@ -199,9 +208,17 @@ export const authService = {
       logDebug('Initializing Google Auth Provider');
       const provider = new GoogleAuthProvider();
       
-      // Configure provider settings
+      // Configure provider settings with more detailed logging
+      logDebug('Configuring Google Auth Provider scopes and settings');
       provider.addScope('profile');
       provider.addScope('email');
+      
+      // Log the current authentication configuration
+      console.log('Current auth configuration:', {
+        persistenceType: auth.persistence ? auth.persistence.type : 'none',
+        currentAuthDomain: auth.config.authDomain,
+        signInMethods: await auth.fetchSignInMethodsForEmail('test@example.com').catch((e: Error) => 'fetch-failed')
+      });
       
       // Set custom parameters for better UX
       // Ensure we're using the correct auth domain
@@ -209,6 +226,14 @@ export const authService = {
       if (!auth.config.authDomain) {
         throw new Error('Firebase auth domain is not configured');
       }
+      
+      // Log domain verification
+      console.log('Domain verification:', {
+        currentDomain,
+        authDomain: auth.config.authDomain,
+        isLocalhost: currentDomain === 'localhost',
+        isDomainMatching: auth.config.authDomain.includes(currentDomain)
+      });
       
       provider.setCustomParameters({
         prompt: 'select_account',
@@ -224,19 +249,36 @@ export const authService = {
       logDebug('Attempting Google sign-in with popup');
       let result;
       try {
-        console.log('Attempting popup sign-in with Google provider');
+        logDebug('Attempting popup sign-in with Google provider');
+        console.log('Pre-sign-in state:', {
+          hasExistingUser: !!auth.currentUser,
+          isPopupOpen: false, // Firebase doesn't expose this
+          localStorageAvailable: typeof window !== 'undefined' && !!window.localStorage,
+          indexedDBAvailable: typeof window !== 'undefined' && !!window.indexedDB
+        });
+        
         result = await firebaseSignInPopup(auth, provider);
+        
         console.log('Popup sign-in result:', {
           success: !!result,
           hasUser: !!result?.user,
-          errorCode: result?.user ? null : 'no_user'
+          errorCode: result?.user ? null : 'no_user',
+          hasIdToken: !!(result?.user && await result.user.getIdToken().catch(() => null)),
+          emailVerified: result?.user?.emailVerified,
+          providerData: result?.user?.providerData
         });
       } catch (popupError: any) {
-        console.error('Popup sign-in failed:', {
+        const errorDetails = {
           code: popupError.code,
           message: popupError.message,
-          stack: popupError.stack
-        });
+          name: popupError.name,
+          stack: popupError.stack?.split('\n')[0], // Just the first line to avoid clutter
+          hasAuthDomain: !!auth.config.authDomain,
+          isRedirectError: popupError.code?.includes('redirect'),
+          isAuthError: popupError instanceof Error && popupError.message?.includes('auth')
+        };
+        
+        console.error('Popup sign-in failed:', errorDetails);
         logDebug('Popup sign-in failed, trying redirect...', popupError);
         
         // If popup fails, try redirect method
