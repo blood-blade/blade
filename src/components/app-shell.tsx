@@ -1128,7 +1128,7 @@ useEffect(() => {
           toast({ title: 'Friend Added', description: 'You are now friends!' });
       } else if (action === 'declineRequest') {
           await updateDoc(currentUserRef, { friendRequestsReceived: arrayRemove(targetUserId) });
-          await updateDoc(targetUserRef, { friendRequestsSent: arrayRemove(authUser.uid) });
+          await updateDoc(targetUserRef, { friendRequestsSent: arrayRemove(currentUser.uid) });
           toast({ title: 'Request Declined' });
       } else if (action === 'removeFriend') {
           await updateDoc(currentUserRef, { friends: arrayRemove(targetUserId) });
