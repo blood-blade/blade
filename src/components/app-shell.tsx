@@ -1514,7 +1514,7 @@ function AppBackground() {
   const isMobile = useIsMobile();
 
   if (!useCustomBackground) {
-    return <div className="absolute inset-0 bg-background" />;
+    return isMobile ? <MobileGalaxyBackground /> : <GalaxyBackground />;
   }
 
   switch(appBackground) {
@@ -1527,7 +1527,7 @@ function AppBackground() {
     case 'grid':
         return <GridBackground />;
     default:
-      return <GalaxyBackground />;
+      return isMobile ? <MobileGalaxyBackground /> : <GalaxyBackground />;
   }
 }
 

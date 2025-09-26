@@ -85,11 +85,36 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body
         className={cn(
-          'min-h-screen bg-background font-sans antialiased',
+          'min-h-screen bg-black font-sans antialiased',
           fontPoppins.variable,
           fontPtSans.variable
         )}
       >
+        {/* Initial loading logo */}
+        <div className="fixed inset-0 flex items-center justify-center bg-black z-[60] transition-opacity duration-500" id="initial-loader">
+          <div className="relative w-32 h-32 animate-pulse">
+            <Image
+              src="/gemini-logo.png"
+              alt="App Logo"
+              fill
+              priority
+              className="object-contain"
+            />
+          </div>
+        </div>
+
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            setTimeout(() => {
+              const loader = document.getElementById('initial-loader');
+              if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+              }
+            }, 1500);
+          `
+        }} />
+
         <AuthProvider>
           <ThemeProvider
             attribute="class"
