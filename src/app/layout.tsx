@@ -93,12 +93,11 @@ export default function RootLayout({
         {/* Initial loading logo */}
         <div className="fixed inset-0 flex items-center justify-center bg-black z-[60] transition-opacity duration-500" id="initial-loader">
           <div className="relative w-32 h-32 animate-pulse">
-            <Image
+            <img
               src="/gemini-logo.png"
               alt="App Logo"
-              fill
-              priority
-              className="object-contain"
+              className="w-full h-full object-contain"
+              style={{ visibility: 'visible' }}
             />
           </div>
         </div>

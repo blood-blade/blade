@@ -1123,7 +1123,7 @@ useEffect(() => {
           });
           await updateDoc(targetUserRef, {
               friends: arrayUnion(currentUser.uid),
-              friendRequestsSent: arrayRemove(authUser.uid)
+              friendRequestsSent: arrayRemove(currentUser.uid)
           });
           toast({ title: 'Friend Added', description: 'You are now friends!' });
       } else if (action === 'declineRequest') {
