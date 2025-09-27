@@ -173,7 +173,7 @@ export function ChatList() {
   const archivedChats = useMemo(() => filteredConversations.filter(c => c.isArchived), [filteredConversations]);
 
   const favoriteChats = useMemo(() => activeChats.filter(c => c.isFavorite), [activeChats]);
-  const unreadChats = useMemo(() => activeChats.filter(c => c.unreadCount && c.unreadCount > 0 && !c.isFavorite), [activeChats]);
+  const unreadChats = useMemo(() => activeChats.filter(c => c.unreadCount && c.unreadCount > 0 && !c.isFavorite && c.id !== selectedChat?.id), [activeChats, selectedChat?.id]);
   const regularChats = useMemo(() => activeChats.filter(c => !c.isFavorite && (!c.unreadCount || c.unreadCount === 0)), [activeChats]);
 
   const usersForNewChat = allUsers.filter(u => u.uid !== currentUser?.uid && !(currentUser?.blockedUsers || []).includes(u.uid));
@@ -247,6 +247,7 @@ export function ChatList() {
                         conversation={convo}
                         isSelected={selectedChat?.id === convo.id}
                         currentUser={currentUser}
+                        selectedChat={selectedChat}
                         onSelect={() => handleChatSelect(convo.id)}
                         onAction={handleConversationAction}
                         onFriendAction={handleFriendAction}
@@ -271,6 +272,7 @@ export function ChatList() {
                         conversation={convo}
                         isSelected={selectedChat?.id === convo.id}
                         currentUser={currentUser}
+                        selectedChat={selectedChat}
                         onSelect={() => handleChatSelect(convo.id)}
                         onAction={handleConversationAction}
                         onFriendAction={handleFriendAction}
@@ -294,6 +296,7 @@ export function ChatList() {
                         conversation={convo}
                         isSelected={selectedChat?.id === convo.id}
                         currentUser={currentUser}
+                        selectedChat={selectedChat}
                         onSelect={() => handleChatSelect(convo.id)}
                         onAction={handleConversationAction}
                         onFriendAction={handleFriendAction}
@@ -313,6 +316,7 @@ export function ChatList() {
                         conversation={aiConversation}
                         isSelected={selectedChat?.id === aiConversation.id}
                         currentUser={currentUser}
+                        selectedChat={selectedChat}
                         onSelect={() => handleChatSelect(aiConversation.id)}
                         onAction={handleConversationAction}
                         onFriendAction={handleFriendAction}
@@ -341,6 +345,7 @@ export function ChatList() {
                                         conversation={convo}
                                         isSelected={selectedChat?.id === convo.id}
                                         currentUser={currentUser}
+                                        selectedChat={selectedChat}
                                         onSelect={() => handleChatSelect(convo.id)}
                                         onAction={handleConversationAction}
                                         onFriendAction={handleFriendAction}
@@ -368,12 +373,13 @@ interface ChatItemProps {
   conversation: Conversation;
   isSelected: boolean;
   currentUser?: User;
+  selectedChat?: Conversation;
   onSelect: () => void;
   onAction: (conversationId: string, action: 'toggleFavorite' | 'archive' | 'unarchive') => void;
   onFriendAction: (targetUserId: string, action: 'sendRequest' | 'acceptRequest' | 'declineRequest' | 'removeFriend') => void;
 }
 
-function ChatItem({ conversation, isSelected, currentUser, onSelect, onAction, onFriendAction }: ChatItemProps) {
+function ChatItem({ conversation, isSelected, currentUser, selectedChat, onSelect, onAction, onFriendAction }: ChatItemProps) {
   const lastMessage = (convo: Conversation) => {
     if(convo.lastMessage) {
         const timestamp = convo.lastMessage.timestamp;
@@ -455,7 +461,7 @@ function ChatItem({ conversation, isSelected, currentUser, onSelect, onAction, o
                     <p className="text-sm text-muted-foreground line-clamp-1 break-words overflow-hidden min-w-0 max-w-full chat-list-force-break">
                     {text}
                 </p>
-                {conversation.unreadCount && conversation.unreadCount > 0 ? (
+                {conversation.unreadCount && conversation.unreadCount > 0 && conversation.id !== selectedChat?.id ? (
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground shrink-0">
                         {conversation.unreadCount}
                     </span>
