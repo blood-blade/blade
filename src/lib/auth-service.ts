@@ -5,7 +5,10 @@ import {
   signInWithRedirect,
   GoogleAuthProvider,
   updateProfile,
-  signOut as firebaseSignOut
+  signOut as firebaseSignOut,
+  setPersistence,
+  browserLocalPersistence,
+  onAuthStateChanged
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
 import { auth as firebaseAuth, db } from './firebase';
@@ -13,6 +16,25 @@ import { setupPresence, setOfflineStatus } from './presence-final';
 
 // Ensure auth is defined
 const auth = firebaseAuth!;
+
+// Set up persistence
+setPersistence(auth, browserLocalPersistence).catch(error => {
+  console.error('Failed to set persistence:', error);
+});
+
+// Set up auth state monitoring
+let authStatePromise: Promise<void> | null = null;
+const waitForAuthState = () => {
+  if (!authStatePromise) {
+    authStatePromise = new Promise((resolve) => {
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        unsubscribe();
+        resolve();
+      });
+    });
+  }
+  return authStatePromise;
+};
 
 export class AuthError extends Error {
   code: string;

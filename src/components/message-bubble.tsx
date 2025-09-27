@@ -14,6 +14,7 @@ import { Button } from './ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 import { memo } from 'react';
 import React from 'react';
+import { formatText } from '@/lib/format-text';
 
 interface MessageBubbleProps {
   message: Message;
@@ -269,7 +270,7 @@ function MessageBubble({ message, sender, isCurrentUser, progress, onCancelUploa
         (message.file) ? "mt-2 px-2 pb-1" : "",
         message.deleted && "italic text-muted-foreground"
       )}>
-        {message.text}
+        {formatText(message.text)}
       </p>
     )}
 

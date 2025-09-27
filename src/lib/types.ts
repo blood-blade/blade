@@ -8,6 +8,7 @@ type Device = {
 };
 
 export type User = {
+  instagramUrl?: string; //
   id: string;
   uid: string;
   name: string;
