@@ -62,59 +62,33 @@ function ResetPasswordForm() {
 
   useEffect(() => {
     const code = searchParams.get('oobCode');
-    const mode = searchParams.get('mode');
     
-    if (code && mode === 'resetPassword') {
+    if (code) {
       setOobCode(code);
-      verifyCode(code);
+      // Quick verification of the code
+      verifyPasswordResetCode(auth, code)
+        .then(email => {
+          setEmail(email);
+          setCodeVerified(true);
+        })
+        .catch(() => {
+          toast({
+            title: 'Invalid reset link',
+            description: 'This password reset link is invalid or has expired.',
+            variant: 'destructive',
+          });
+          router.replace('/login?error=invalid_reset_link');
+        });
     } else {
-      toast({
-        title: 'Invalid reset link',
-        description: 'This password reset link is invalid or has expired.',
-        variant: 'destructive',
-      });
+      router.replace('/login');
     }
   }, [searchParams]);
 
-  const verifyCode = async (code: string) => {
-    try {
-      const userEmail = await verifyPasswordResetCode(auth, code);
-      setEmail(userEmail);
-      setCodeVerified(true);
-      // Clear any existing error messages
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.has('error')) {
-        router.replace(`/reset-password?oobCode=${code}&mode=resetPassword`);
-      }
-      toast({
-        title: 'Reset link verified',
-        description: 'Please enter your new password below.',
-      });
-    } catch (error: any) {
-      console.error('Error verifying reset code:', error);
-      let errorMessage = 'Invalid or expired reset link.';
-      
-      if (error.code === 'auth/expired-action-code') {
-        errorMessage = 'This reset link has expired. Please request a new one.';
-      } else if (error.code === 'auth/invalid-action-code') {
-        errorMessage = 'This reset link is invalid or has already been used.';
-      }
-      
-      toast({
-        title: 'Verification failed',
-        description: errorMessage,
-        variant: 'destructive',
-      });
-    }
-  };
+  // No separate verification function needed
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    if (!codeVerified || !oobCode) {
-      toast({
-        title: 'Error',
-        description: 'Invalid reset link. Please request a new password reset.',
-        variant: 'destructive',
-      });
+    if (!oobCode) {
+      router.replace('/login');
       return;
     }
 
@@ -122,18 +96,8 @@ function ResetPasswordForm() {
     try {
       await confirmPasswordReset(auth, oobCode, values.password);
       
-      toast({
-        title: 'Password reset successful',
-        description: 'Your password has been updated. You can now log in with your new password.',
-      });
-      
-      // Immediately clear verification state
-      setCodeVerified(false);
-      setOobCode('');
-      // Redirect to login page after a brief delay
-      setTimeout(() => {
-        router.replace('/login?message=Password reset successful. Please log in with your new password.');
-      }, 1500);
+      // Immediately redirect to login
+      router.replace('/login?message=Password reset successful. Please log in with your new password.');
     } catch (error: any) {
       console.error('Error resetting password:', error);
       let errorMessage = 'Failed to reset password. Please try again.';
@@ -151,9 +115,6 @@ function ResetPasswordForm() {
       });
     } finally {
       setLoading(false);
-      if (!codeVerified) {
-        router.replace('/login?error=verification_failed');
-      }
     }
   };
 
