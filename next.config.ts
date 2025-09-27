@@ -95,12 +95,12 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.firebaseio.com",
-              `connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebase.com ${firebaseAuthDomain} wss://*.firebaseio.com`,
+              `connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebase.com ${firebaseAuthDomain} wss://*.firebaseio.com https://api.cloudinary.com https://media.tenor.com https://*.giphy.com https://*.tenor.com https://*.cloudinary.com`,
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data: https: blob:",
+              "img-src 'self' data: https: blob: https://*.cloudinary.com https://media.tenor.com https://*.giphy.com",
               "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
-              "media-src 'self' https: blob:",
+              "media-src 'self' https: blob: https://*.cloudinary.com https://media.tenor.com https://*.giphy.com",
             ].join('; '),
           },
           // Allow cross-origin authentication for development
