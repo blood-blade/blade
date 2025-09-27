@@ -1,10 +1,55 @@
 
-'use client'
-import { useEffect } from 'react';
+'use client';
+
+import { useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMobileDesign } from '@/components/providers/mobile-provider';
-import Link from 'next/link';
-import { ChevronRight, User, Shield, Palette, Bell, Mail, Image as ImageIcon, CloudSun } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { SettingsSkeleton } from '@/components/settings';
+
+// Dynamically import settings menu with loading state
+const DynamicMobileSettingsMenu = dynamic(
+  () => import('@/components/settings').then(mod => mod.MobileSettingsMenu),
+  {
+    loading: () => <SettingsSkeleton />,
+    ssr: false
+  }
+);
+
+export default function SettingsPage() {
+    const router = useRouter();
+    const { isMobileView } = useMobileDesign();
+
+    useEffect(() => {
+        if (!isMobileView) {
+            router.replace('/settings/profile');
+        }
+    }, [isMobileView, router]);
+
+    if (!isMobileView) {
+        return null;
+    }
+
+    return (
+        <Suspense fallback={<SettingsSkeleton />}>
+            <DynamicMobileSettingsMenu />
+        </Suspense>
+    );
+}
+import { useEffect, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
+import { useMobileDesign } from '@/components/providers/mobile-provider';
+import dynamic from 'next/dynamic';
+import { SettingsSkeleton } from '@/components/settings/settings-skeleton';
+
+// Dynamically import settings menu with loading state
+const DynamicMobileSettingsMenu = dynamic(
+  () => import('@/components/settings/mobile-settings-menu').then(mod => mod.MobileSettingsMenu),
+  {
+    loading: () => <SettingsSkeleton />,
+    ssr: false
+  }
+);
 
 const settingsItems = [
     {
@@ -81,9 +126,12 @@ export default function SettingsPage() {
     }, [isMobileView, router]);
 
     if (!isMobileView) {
-        // Render nothing on desktop while redirecting
         return null;
     }
 
-    return <MobileSettingsMenu />;
+    return (
+        <Suspense fallback={<SettingsSkeleton />}>
+            <DynamicMobileSettingsMenu />
+        </Suspense>
+    );
 }
