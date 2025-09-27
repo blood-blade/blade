@@ -48,11 +48,22 @@ export const isLowEndDevice = () => {
     // @ts-ignore: deviceMemory exists but TypeScript doesn't know about it
     navigator.deviceMemory <= 4;
   
+  // Define NetworkInformation interface
+  interface NetworkInformation {
+    saveData: boolean;
+    effectiveType: '2g' | '3g' | '4g' | '5g' | 'slow-2g';
+  }
+
+  // Extend Navigator interface
+  interface Navigator {
+    connection?: NetworkInformation;
+    deviceMemory?: number;
+  }
+
   // Check for connection speed
-  const slowConnection = navigator.connection &&
-    // @ts-ignore: connection exists but TypeScript doesn't know about it
-    (navigator.connection.saveData || 
-     // @ts-ignore: effectiveType exists but TypeScript doesn't know about it
+  const slowConnection = 'connection' in navigator &&
+    navigator.connection &&
+    (navigator.connection.saveData ||
      ['slow-2g', '2g', '3g'].includes(navigator.connection.effectiveType));
   
   return lowCPU || lowMemory || slowConnection;
