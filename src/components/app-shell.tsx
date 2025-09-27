@@ -55,47 +55,104 @@ export async function uploadToCloudinaryXHR(
   onProgress?: (p: number) => void,
   signal?: { xhrAbort?: () => void }
 ): Promise<any> {
-  const url = `https://api.cloudinary.com/v1_1/${cloudName}/upload`;
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('upload_preset', uploadPreset);
+  if (!cloudName || !uploadPreset) {
+    throw new Error('Missing required Cloudinary configuration');
+  }
 
-  console.log('Starting upload with config:', {
-    url,
-    cloudName,
-    uploadPreset,
-    fileType: file.type,
-    fileSize: file.size
-  });
+  // Basic file validation
+  if (!file || !(file instanceof File)) {
+    throw new Error('Invalid file object');
+  }
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      body: formData,
-      mode: 'cors', // Explicit CORS mode
-      headers: {
-        'Accept': 'application/json',
-      },
-    });
+  if (file.size === 0) {
+    throw new Error('File is empty');
+  }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Upload failed:', {
-        status: response.status,
-        statusText: response.statusText,
-        response: errorText,
-        headers: Object.fromEntries(response.headers)
-      });
-      throw new Error(`Cloudinary upload failed: ${response.status} ${errorText}`);
+  return new Promise((resolve, reject) => {
+    // Use auto upload endpoint to handle both images and videos
+    const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', uploadPreset);
+    
+    // Add timestamp to prevent caching issues
+    formData.append('timestamp', String(Date.now()));
+    
+    // Add resource type hints
+    if (file.type.startsWith('image/')) {
+      formData.append('resource_type', 'image');
+    } else if (file.type.startsWith('video/')) {
+      formData.append('resource_type', 'video');
     }
 
-    const data = await response.json();
-    console.log('Cloudinary upload success:', data);
-    return data;
-  } catch (error) {
-    console.error('Upload error:', error);
-    throw error;
-  }
+    console.log('Starting upload with config:', {
+      url,
+      cloudName,
+      uploadPreset,
+      fileType: file.type,
+      fileSize: file.size
+    });
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.withCredentials = false; // Important for CORS
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+    
+    if (signal) {
+      signal.xhrAbort = () => xhr.abort();
+    }
+
+    // Setup progress handler
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        const percentComplete = (e.loaded / e.total) * 100;
+        onProgress(percentComplete);
+      }
+    };
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === 4) {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            console.log('Upload successful:', {
+              publicId: response.public_id,
+              url: response.secure_url,
+              format: response.format,
+              resourceType: response.resource_type
+            });
+            resolve(response);
+          } catch (e) {
+            reject(new Error('Invalid JSON response from Cloudinary'));
+          }
+        } else {
+          console.error('Upload failed:', {
+            status: xhr.status,
+            response: xhr.responseText,
+            url: url,
+            cloudName: cloudName,
+            uploadPreset: uploadPreset,
+            fileType: file.type,
+            fileSize: file.size
+          });
+          reject(new Error(`Cloudinary upload failed: ${xhr.status} ${xhr.responseText}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      console.error('Network error during upload', {
+        url: url,
+        cloudName: cloudName,
+        uploadPreset: uploadPreset,
+        fileType: file.type,
+        fileSize: file.size
+      });
+      reject(new Error('Network error during Cloudinary upload'));
+    };
+    
+    xhr.send(formData);
+  });
 }
 
 
@@ -748,20 +805,61 @@ useEffect(() => {
   }, [toast]);
 
   const handleFileUpload = useCallback(async (file: File, messageText: string, chatId: string, senderId: string): Promise<string> => {
+      // Basic file validation
+      if (!file || !(file instanceof File)) {
+        toast({
+          title: 'Invalid File',
+          description: 'The selected file is invalid.',
+          variant: 'destructive'
+        });
+        throw new Error('Invalid file object');
+      }
+
+      if (file.size === 0) {
+        toast({
+          title: 'Empty File',
+          description: 'The selected file is empty.',
+          variant: 'destructive'
+        });
+        throw new Error('File is empty');
+      }
+
+      // File size limit (10MB for images/audio, 50MB for videos)
+      const maxSize = file.type.startsWith('video/') ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        toast({
+          title: 'File Too Large',
+          description: `File size must be less than ${maxSize / (1024 * 1024)}MB.`,
+          variant: 'destructive'
+        });
+        throw new Error('File too large');
+      }
+
       // Videos, Images, Audio, GIFs -> Cloudinary
       if (file.type.startsWith('video/') || file.type.startsWith('image/') || file.type.startsWith('audio/')) {
+        console.log('Starting Cloudinary upload for file:', {
+          type: file.type,
+          size: file.size,
+          name: file.name
+        });
+        
         try {
-          console.log('Starting Cloudinary upload for file:', {
-            type: file.type,
-            size: file.size,
-            name: file.name
-          });
           return await handleCloudinaryUpload(file, messageText, chatId, senderId);
-        } catch (error) {
+        } catch (error: any) {
           console.error('Cloudinary upload failed:', error);
+          
+          let errorMessage = 'Could not upload file. Please try again.';
+          if (error?.message?.includes('configuration')) {
+            errorMessage = 'Upload service is not properly configured. Please contact support.';
+          } else if (error?.message?.includes('Network error')) {
+            errorMessage = 'Network error occurred. Please check your internet connection.';
+          } else if (error?.message?.includes('413')) {
+            errorMessage = 'File size exceeds server limits.';
+          }
+
           toast({
             title: 'Upload Failed',
-            description: 'Could not upload file to Cloudinary. Please try again.',
+            description: errorMessage,
             variant: 'destructive'
           });
           throw error;

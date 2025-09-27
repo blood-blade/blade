@@ -33,10 +33,14 @@ async function uploadToCloudinaryXHR(
   uploadPreset: string
 ): Promise<any> {
   return new Promise((resolve, reject) => {
-    const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+    const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', uploadPreset);
+    
+    // Add params specific to profile image uploads
+    formData.append('folder', 'profile_images');
+    formData.append('transformation', 'c_fill,w_400,h_400');
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
@@ -132,17 +136,60 @@ export default function ProfilePage() {
     const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
     if (!cloudName || !uploadPreset) {
-        toast({ title: 'Cloudinary config missing', variant: 'destructive' });
+        console.error('Cloudinary configuration missing:', { cloudName: !!cloudName, uploadPreset: !!uploadPreset });
+        toast({ 
+          title: 'Configuration Error', 
+          description: 'Avatar upload is not properly configured. Please contact support.', 
+          variant: 'destructive' 
+        });
         setIsUploading(false);
         return;
     }
 
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      toast({ 
+        title: 'Invalid File', 
+        description: 'Please select an image file (PNG, JPEG, etc).', 
+        variant: 'destructive' 
+      });
+      setIsUploading(false);
+      return;
+    }
+
+    // 5MB limit for avatar images
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ 
+        title: 'File Too Large', 
+        description: 'Please select an image smaller than 5MB.', 
+        variant: 'destructive' 
+      });
+      setIsUploading(false);
+      return;
+    }
+
     try {
+        console.log('Starting avatar upload:', { 
+          fileName: file.name, 
+          fileType: file.type, 
+          fileSize: Math.round(file.size / 1024) + 'KB'
+        });
+
         const result = await uploadToCloudinaryXHR(file, cloudName, uploadPreset);
+        
+        if (!result.secure_url) {
+          throw new Error('Cloudinary response missing secure_url');
+        }
+        
         await handleUpdatePhotoUrl(result.secure_url);
-    } catch (error) {
+        console.log('Avatar upload successful:', { url: result.secure_url });
+    } catch (error: any) {
         console.error("Error uploading avatar to Cloudinary:", error);
-        toast({ title: 'Error', description: 'Failed to upload new avatar.', variant: 'destructive' });
+        toast({ 
+          title: 'Upload Failed', 
+          description: error.message || 'Could not upload avatar. Please try again.', 
+          variant: 'destructive' 
+        });
     } finally {
         setIsUploading(false);
         setPreviewFile(null);
