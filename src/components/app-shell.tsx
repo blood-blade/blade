@@ -167,8 +167,6 @@ export async function uploadToCloudinaryXHR(
     throw error;
   }
 }
-}
-
 
 function useChatData() {
   const { user: authUser, loading: authLoading } = useAuth();
@@ -869,7 +867,11 @@ useEffect(() => {
 
         // Cleanup
         xhrRequests.current.delete(tempId);
-        setUploadProgress(prev => new Map(prev).delete(tempId));
+        setUploadProgress(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(tempId);
+          return newMap;
+        });
         return tempId;
 
     } catch (err: any) {
@@ -897,7 +899,11 @@ useEffect(() => {
 
         setMessages(prev => prev.map(m => m.clientTempId === tempId ? {...m, status: 'error'} : m));
         xhrRequests.current.delete(tempId);
-        setUploadProgress(prev => new Map(prev).delete(tempId));
+        setUploadProgress(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(tempId);
+          return newMap;
+        });
         throw err;
     }
   }, [toast]);
@@ -1018,7 +1024,11 @@ useEffect(() => {
       uploadTask.on('state_changed', 
           (snapshot) => {
               const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              setUploadProgress(prev => new Map(prev).set(tempId, progress));
+              setUploadProgress(prev => {
+                const newMap = new Map(prev);
+                newMap.set(tempId, progress);
+                return newMap;
+              });
           },
           (error) => {
               console.error('Upload error:', error);
@@ -1190,10 +1200,6 @@ useEffect(() => {
     if (action === 'delete') {
       const messageToDelete = messages.find(m => m.id === messageId || m.clientTempId === messageId);
       if (!messageToDelete) return;
-    
-    if (action === 'delete') {
-      const messageToDelete = messages.find(m => m.id === messageId || m.clientTempId === messageId);
-      if (!messageToDelete) return;
       
       // Optimistically update messages list
       setMessages(prevMessages => prevMessages.map(msg => 
@@ -1221,7 +1227,6 @@ useEffect(() => {
           } : undefined
         } : convo
       ));
-      }
       
       const messageRef = doc(db, 'conversations', selectedChat.id, 'messages', messageToDelete.id);
       const convoRef = doc(db, 'conversations', selectedChat.id);
@@ -1326,9 +1331,7 @@ useEffect(() => {
         setMessages(messages);
       }
     }
-  }, [selectedChat, currentUser, messages]);
-
-  const handleFriendAction = useCallback(async (targetUserId: string, action: 'sendRequest' | 'acceptRequest' | 'declineRequest' | 'removeFriend') => {
+  }, [selectedChat, currentUser, messages]);  const handleFriendAction = useCallback(async (targetUserId: string, action: 'sendRequest' | 'acceptRequest' | 'declineRequest' | 'removeFriend') => {
     if (!currentUser) return;
     const currentUserRef = doc(db, 'users', currentUser.uid);
     const targetUserRef = doc(db, 'users', targetUserId);
