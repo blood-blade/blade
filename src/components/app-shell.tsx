@@ -93,65 +93,106 @@ export async function uploadToCloudinaryXHR(
       fileSize: file.size
     });
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
-    xhr.withCredentials = false; // Important for CORS
-    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-    
-    if (signal) {
-      signal.xhrAbort = () => xhr.abort();
-    }
-
-    // Setup progress handler
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        const percentComplete = (e.loaded / e.total) * 100;
-        onProgress(percentComplete);
-      }
-    };
-
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState === 4) {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            console.log('Upload successful:', {
-              publicId: response.public_id,
-              url: response.secure_url,
-              format: response.format,
-              resourceType: response.resource_type
-            });
-            resolve(response);
-          } catch (e) {
-            reject(new Error('Invalid JSON response from Cloudinary'));
-          }
-        } else {
-          console.error('Upload failed:', {
-            status: xhr.status,
-            response: xhr.responseText,
-            url: url,
-            cloudName: cloudName,
-            uploadPreset: uploadPreset,
-            fileType: file.type,
-            fileSize: file.size
-          });
-          reject(new Error(`Cloudinary upload failed: ${xhr.status} ${xhr.responseText}`));
-        }
-      }
-    };
-
-    xhr.onerror = () => {
-      console.error('Network error during upload', {
-        url: url,
-        cloudName: cloudName,
-        uploadPreset: uploadPreset,
+      // Modern fetch-based upload with proper error handling
+    try {
+      console.log('Starting upload to Cloudinary:', {
+        url,
+        cloudName,
+        uploadPreset,
         fileType: file.type,
         fileSize: file.size
       });
-      reject(new Error('Network error during Cloudinary upload'));
-    };
-    
-    xhr.send(formData);
+
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        mode: 'cors',
+        credentials: 'omit',
+        headers: {
+          'Accept': 'application/json'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId); // Clear timeout if request completes
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Cloudinary upload failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          url,
+          cloudName,
+          fileType: file.type,
+          fileSize: file.size,
+          headers: Object.fromEntries(response.headers)
+        });
+
+        // Add custom error handling for common cases
+        if (response.status === 413) {
+          throw new Error('413: File size exceeds server limits');
+        } else if (response.status === 401 || response.status === 403) {
+          throw new Error('Upload not authorized. Please check your Cloudinary configuration.');
+        }
+
+        throw new Error(`Cloudinary upload failed: ${response.status} - ${response.statusText}. ${errorText}`);
+      }
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (error) {
+        console.error('Error parsing Cloudinary response:', error);
+        throw new Error('Invalid response format from upload service');
+      }
+
+      if (!data.secure_url) {
+        console.error('Invalid Cloudinary response:', data);
+        throw new Error('Invalid response: missing secure_url');
+      }
+
+      console.log('Upload successful:', {
+        publicId: data.public_id,
+        url: data.secure_url,
+        format: data.format,
+        resourceType: data.resource_type,
+        bytes: data.bytes,
+        duration: data.duration
+      });
+
+      return {
+        secure_url: data.secure_url,
+        resource_type: data.resource_type,
+        duration: data.duration,
+        format: data.format,
+        bytes: data.bytes,
+        public_id: data.public_id
+      };
+    } catch (error: any) {
+      console.error('Upload error:', error, {
+        url,
+        cloudName,
+        uploadPreset,
+        fileType: file.type,
+        fileSize: file.size
+      });
+      
+      // Enhanced error reporting
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        throw new Error('Network error: Could not connect to Cloudinary. Please check your internet connection.');
+      }
+      
+      if (error.message.includes('Failed to execute \'fetch\'')) {
+        throw new Error('Browser error: The request was blocked. Please check your browser settings and extensions.');
+      }
+      
+      throw error;
+    }
   });
 }
 
@@ -740,8 +781,8 @@ useEffect(() => {
     const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
     
-    // Debug environment variables
-    console.log('Environment check:', {
+    // Debug environment variables and validate configuration
+    console.log('Checking Cloudinary config:', { 
       nodeEnv: process.env.NODE_ENV,
       hasCloudName: !!cloudName,
       hasUploadPreset: !!uploadPreset,
@@ -758,48 +799,132 @@ useEffect(() => {
         toast({ 
           title: 'Upload Error', 
           description: 'Missing Cloudinary configuration. Please check your environment setup.',
-          variant: 'destructive' 
+          variant: 'destructive',
+          duration: 5000
         });
         return Promise.reject(error);
     }
 
     let xhrSignal: { xhrAbort?: ()=>void } = {};
     xhrRequests.current.set(tempId, xhrSignal);
+    
     try {
-        const { secure_url, resource_type, duration } = await uploadToCloudinaryXHR(file, cloudName, uploadPreset, (p) => {
-            setUploadProgress(prev => new Map(prev).set(tempId, p));
-        }, xhrSignal);
+        // Start the upload with Cloudinary
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', uploadPreset);
+        formData.append('timestamp', String(Date.now())); // Prevent caching
+        
+        // Add resource type hints
+        if (file.type.startsWith('image/')) {
+          formData.append('resource_type', 'image');
+        } else if (file.type.startsWith('video/')) {
+          formData.append('resource_type', 'video');
+        }
 
+        const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+        
+        console.log('Starting Cloudinary upload:', {
+          url,
+          fileType: file.type,
+          fileSize: file.size,
+          uploadPreset
+        });
+
+        const response = await fetch(url, {
+          method: 'POST',
+          body: formData,
+          mode: 'cors',
+          credentials: 'omit',
+          signal: AbortSignal.timeout(30000) // 30 second timeout
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Cloudinary upload failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorText,
+            url,
+            fileType: file.type,
+            fileSize: file.size
+          });
+          throw new Error(`Upload failed: ${response.status} - ${response.statusText}. ${errorText}`);
+        }
+
+        const data = await response.json();
+        if (!data.secure_url) {
+          console.error('Invalid Cloudinary response:', data);
+          throw new Error('Invalid response: missing secure_url');
+        }
+
+        // Successfully uploaded to Cloudinary, now create the message
         const fileData: Message['file'] = {
-            url: secure_url,
+            url: data.secure_url,
             type: file.type,
-            name: file.name,
+            name: file.name
         };
         
-        if (resource_type === 'video' && duration) {
-            fileData.duration = duration;
+        if (data.resource_type === 'video' && data.duration) {
+            fileData.duration = data.duration;
         }
+
+        console.log('Upload successful:', {
+          publicId: data.public_id,
+          url: data.secure_url,
+          type: data.resource_type
+        });
 
         const finalMessageData = {
             senderId,
             text: messageText || '',
             timestamp: serverTimestamp(),
             clientTempId: tempId,
-            file: fileData,
+            file: fileData
         };
 
+        // Store the message in Firebase
         const messageCollectionRef = collection(db, 'conversations', chatId, 'messages');
         await addDoc(messageCollectionRef, finalMessageData);
-        await updateDoc(doc(db, 'conversations', chatId), { lastMessage: { text: messageText || `Sent a ${file.type.split('/')[0]}`, senderId, timestamp: serverTimestamp() } });
+        await updateDoc(doc(db, 'conversations', chatId), { 
+          lastMessage: { 
+            text: messageText || `Sent a ${file.type.split('/')[0]}`, 
+            senderId, 
+            timestamp: serverTimestamp() 
+          } 
+        });
 
+        // Cleanup
         xhrRequests.current.delete(tempId);
-        setUploadProgress(prev => { const n = new Map(prev); n.delete(tempId); return n; });
+        setUploadProgress(prev => new Map(prev).delete(tempId));
         return tempId;
-    } catch (err) {
-        console.error('Cloudinary upload error', err);
+
+    } catch (err: any) {
+        console.error('Upload error:', err, {
+          fileType: file.type,
+          fileSize: file.size
+        });
+
+        // Enhanced error handling
+        let errorMessage = 'Could not upload file. Please try again.';
+        if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+          errorMessage = 'Network error: Could not connect to upload service. Please check your internet connection.';
+        } else if (err.message.includes('timeout')) {
+          errorMessage = 'Upload timed out. Please try again with a smaller file or check your connection.';
+        } else if (err.message.includes('blocked') || err.message.includes('CORS')) {
+          errorMessage = 'Upload was blocked. Please check your browser settings and extensions.';
+        }
+
+        toast({
+          title: 'Upload Failed',
+          description: errorMessage,
+          variant: 'destructive',
+          duration: 5000
+        });
+
         setMessages(prev => prev.map(m => m.clientTempId === tempId ? {...m, status: 'error'} : m));
         xhrRequests.current.delete(tempId);
-        setUploadProgress(prev => { const n = new Map(prev); n.delete(tempId); return n; });
+        setUploadProgress(prev => new Map(prev).delete(tempId));
         throw err;
     }
   }, [toast]);
@@ -844,23 +969,49 @@ useEffect(() => {
         });
         
         try {
+          // Verify Cloudinary configuration before uploading
+          const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+          const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+          
+          console.log('Checking Cloudinary config:', { 
+            hasCloudName: !!cloudName, 
+            hasUploadPreset: !!uploadPreset,
+            uploadPreset: uploadPreset
+          });
+
+          if (!cloudName || !uploadPreset) {
+            throw new Error('Cloudinary configuration is missing');
+          }
+
           return await handleCloudinaryUpload(file, messageText, chatId, senderId);
         } catch (error: any) {
           console.error('Cloudinary upload failed:', error);
           
           let errorMessage = 'Could not upload file. Please try again.';
+          let errorTitle = 'Upload Failed';
+
           if (error?.message?.includes('configuration')) {
             errorMessage = 'Upload service is not properly configured. Please contact support.';
+            errorTitle = 'Configuration Error';
           } else if (error?.message?.includes('Network error')) {
             errorMessage = 'Network error occurred. Please check your internet connection.';
+            errorTitle = 'Connection Error';
           } else if (error?.message?.includes('413')) {
             errorMessage = 'File size exceeds server limits.';
+            errorTitle = 'File Too Large';
+          } else if (error?.message?.includes('blocked')) {
+            errorMessage = 'Upload was blocked. Please check your browser settings and extensions.';
+            errorTitle = 'Upload Blocked';
+          } else if (error?.message?.includes('CORS')) {
+            errorMessage = 'Upload failed due to security restrictions. Please try again or contact support.';
+            errorTitle = 'Security Error';
           }
 
           toast({
-            title: 'Upload Failed',
+            title: errorTitle,
             description: errorMessage,
-            variant: 'destructive'
+            variant: 'destructive',
+            duration: 5000
           });
           throw error;
         }
