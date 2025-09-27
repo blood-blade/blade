@@ -1,3 +1,14 @@
+// Define interfaces at the module level
+interface NetworkInformation {
+  saveData: boolean;
+  effectiveType: '2g' | '3g' | '4g' | '5g' | 'slow-2g';
+}
+
+interface ExtendedNavigator extends Navigator {
+  connection?: NetworkInformation;
+  deviceMemory?: number;
+}
+
 // Utility functions for performance optimization
 
 // Debounce function with proper typing
@@ -40,31 +51,20 @@ export const hasReducedMotion = () =>
 export const isLowEndDevice = () => {
   if (typeof window === 'undefined') return false;
   
+  // Cast navigator to our extended type
+  const nav = navigator as ExtendedNavigator;
+  
   // Check for hardware concurrency (CPU cores)
-  const lowCPU = navigator.hardwareConcurrency <= 4;
+  const lowCPU = nav.hardwareConcurrency <= 4;
   
   // Check for device memory (if available)
-  const lowMemory = ('deviceMemory' in navigator) && 
-    // @ts-ignore: deviceMemory exists but TypeScript doesn't know about it
-    navigator.deviceMemory <= 4;
+  const lowMemory = nav.deviceMemory !== undefined && nav.deviceMemory <= 4;
   
-  // Define NetworkInformation interface
-  interface NetworkInformation {
-    saveData: boolean;
-    effectiveType: '2g' | '3g' | '4g' | '5g' | 'slow-2g';
-  }
-
-  // Extend Navigator interface
-  interface Navigator {
-    connection?: NetworkInformation;
-    deviceMemory?: number;
-  }
-
   // Check for connection speed
-  const slowConnection = 'connection' in navigator &&
-    navigator.connection &&
-    (navigator.connection.saveData ||
-     ['slow-2g', '2g', '3g'].includes(navigator.connection.effectiveType));
+  const slowConnection = nav.connection !== undefined && (
+    nav.connection.saveData ||
+    ['slow-2g', '2g', '3g'].includes(nav.connection.effectiveType)
+  );
   
   return lowCPU || lowMemory || slowConnection;
 };
@@ -78,15 +78,18 @@ export const getPerformanceConfig = () => {
     cacheTime: 1000 * 60 * 30, // 30 minutes
     debounceTime: 150,
     throttleTime: 100,
-  };
+  } as const;
 
   if (isLowEndDevice()) {
-    config.enableAnimations = false;
-    config.prefetchLimit = 1;
-    config.imageQuality = 'low';
-    config.cacheTime = 1000 * 60 * 15; // 15 minutes
-    config.debounceTime = 300;
-    config.throttleTime = 200;
+    return {
+      ...config,
+      enableAnimations: false,
+      prefetchLimit: 1,
+      imageQuality: 'low' as const,
+      cacheTime: 1000 * 60 * 15, // 15 minutes
+      debounceTime: 300,
+      throttleTime: 200,
+    };
   }
 
   return config;
