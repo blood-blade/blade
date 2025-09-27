@@ -7,8 +7,10 @@ import {
   updateProfile,
   signOut as firebaseSignOut,
   setPersistence,
+  browserSessionPersistence,
   browserLocalPersistence,
-  onAuthStateChanged
+  onAuthStateChanged,
+  deleteUser
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
 import { auth as firebaseAuth, db } from './firebase';
@@ -17,8 +19,8 @@ import { setupPresence, setOfflineStatus } from './presence-final';
 // Ensure auth is defined
 const auth = firebaseAuth!;
 
-// Set up persistence
-setPersistence(auth, browserLocalPersistence).catch(error => {
+// Set up session-only persistence by default
+setPersistence(auth, browserSessionPersistence).catch(error => {
   console.error('Failed to set persistence:', error);
 });
 
@@ -486,12 +488,52 @@ export const authService = {
     try {
       const user = auth.currentUser;
       if (user) {
+        // Update user status in Firestore
         await updateDoc(doc(db, 'users', user.uid), {
           status: 'offline',
           lastSeen: serverTimestamp()
         });
+
+        // Clear presence
+        await setOfflineStatus(user.uid);
+
+        // Clear local storage and session storage
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('lastLogin');
+          localStorage.removeItem('sessionUser');
+          localStorage.removeItem('firebase:host:*');
+          sessionStorage.clear();
+
+          // Clear IndexedDB
+          try {
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+              if (db.name?.includes('firebase') && db.name) {
+                await window.indexedDB.deleteDatabase(db.name);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to clear IndexedDB:', e);
+          }
+
+          // Clear auth-related cookies
+          document.cookie.split(';').forEach(c => {
+            if (c.includes('firebase')) {
+              document.cookie = c
+                .replace(/^ +/, '')
+                .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`);
+            }
+          });
+        }
       }
+
+      // Sign out from Firebase
       await firebaseSignOut(firebaseAuth);
+
+      // Force a page reload to clear any remaining state
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     } catch (error: any) {
       console.error('Sign out error:', error);
       throw new AuthError(
