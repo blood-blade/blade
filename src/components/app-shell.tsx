@@ -332,8 +332,10 @@ useEffect(() => {
       });
 
       const convos = await Promise.all(convosPromises);
-      convos.sort((a, b) => (b.lastMessage?.timestamp?.toMillis() || 0) - (a.lastMessage?.timestamp?.toMillis() || 0));
-      
+      // Keep conversations in their current order if a chat is selected
+      if (!selectedChat) {
+        convos.sort((a, b) => (b.lastMessage?.timestamp?.toMillis() || 0) - (a.lastMessage?.timestamp?.toMillis() || 0));
+      }
       setConversations(convos);
 
     });
