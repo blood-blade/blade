@@ -96,24 +96,20 @@ export default function LoginPage() {
         // Handle specific Firebase auth error codes
         switch (e.code) {
           case 'auth/user-not-found':
-            errorMessage = 'No account found with this email address. Please check your email or sign up for a new account.';
+            errorMessage = 'The email address you entered is not registered. Please check your email or click "Sign up" to create a new account.';
             break;
           case 'auth/wrong-password':
-            errorMessage = 'Incorrect password. Please check your password and try again.';
+            errorMessage = 'The password you entered is incorrect. You can click "Forgot your password?" to reset it.';
             break;
           case 'auth/invalid-credential':
             console.error('Invalid credential error details:', e);
-            
-            // Clear all auth state
             await auth.signOut();
             
-            // Clear all storage
+            // Clear session data
             if (typeof window !== 'undefined') {
-              // Clear local/session storage
               localStorage.clear();
               sessionStorage.clear();
               
-              // Clear IndexedDB
               try {
                 const databases = await window.indexedDB.databases();
                 await Promise.all(
@@ -126,7 +122,6 @@ export default function LoginPage() {
                 console.error('Error clearing IndexedDB:', dbError);
               }
               
-              // Clear cookies
               document.cookie.split(';').forEach(c => {
                 document.cookie = c
                   .replace(/^ +/, '')
@@ -134,28 +129,27 @@ export default function LoginPage() {
               });
             }
             
-            errorMessage = 'Your session has expired. Please try logging in again.';
+            errorMessage = 'Your session has expired. The page will refresh in a moment - please try logging in again.';
             
-            // Reload after a brief delay to ensure cleanup is complete
             setTimeout(() => {
               window.location.href = '/login';
             }, 1500);
             break;
           case 'auth/invalid-email':
-            errorMessage = 'Please enter a valid email address.';
+            errorMessage = 'This email address is not valid. Please make sure you entered a correct email address (e.g., name@example.com).';
             break;
           case 'auth/user-disabled':
-            errorMessage = 'This account has been disabled. Please contact support.';
+            errorMessage = 'This account has been disabled. If you believe this is a mistake, please contact support for assistance.';
             break;
           case 'auth/too-many-requests':
-            errorMessage = 'Too many failed login attempts. Please try again later or reset your password.';
+            errorMessage = 'Access temporarily blocked due to multiple failed attempts. You can:\n1. Wait a few minutes and try again\n2. Click "Forgot your password?" to reset your password\n3. Try signing in with Google instead';
             break;
           case 'auth/network-request-failed':
-            errorMessage = 'Network error. Please check your internet connection and try again.';
+            errorMessage = 'Unable to connect to the server. Please check that:\n1. Your internet connection is working\n2. You are not in airplane mode\n3. Your firewall is not blocking the connection';
             break;
           default:
             if (e.message) {
-              errorMessage = e.message;
+              errorMessage = `Login failed: ${e.message}. Please try again or contact support if the problem persists.`;
             }
         }
         
