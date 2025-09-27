@@ -81,6 +81,11 @@ function ResetPasswordForm() {
       const userEmail = await verifyPasswordResetCode(auth, code);
       setEmail(userEmail);
       setCodeVerified(true);
+      // Clear any existing error messages
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('error')) {
+        router.replace(`/reset-password?oobCode=${code}&mode=resetPassword`);
+      }
       toast({
         title: 'Reset link verified',
         description: 'Please enter your new password below.',
@@ -122,10 +127,13 @@ function ResetPasswordForm() {
         description: 'Your password has been updated. You can now log in with your new password.',
       });
       
+      // Immediately clear verification state
+      setCodeVerified(false);
+      setOobCode('');
       // Redirect to login page after a brief delay
       setTimeout(() => {
-        router.push('/login?message=Password reset successful. Please log in with your new password.');
-      }, 2000);
+        router.replace('/login?message=Password reset successful. Please log in with your new password.');
+      }, 1500);
     } catch (error: any) {
       console.error('Error resetting password:', error);
       let errorMessage = 'Failed to reset password. Please try again.';
@@ -143,6 +151,9 @@ function ResetPasswordForm() {
       });
     } finally {
       setLoading(false);
+      if (!codeVerified) {
+        router.replace('/login?error=verification_failed');
+      }
     }
   };
 
