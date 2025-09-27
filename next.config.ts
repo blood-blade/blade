@@ -69,22 +69,56 @@ const nextConfig: NextConfig = {
   output: process.env.VERCEL ? 'standalone' : undefined,
   // Replit environment configuration
   async headers() {
+    // Get the Firebase auth domain from env
+    const firebaseAuthDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '';
+    
     return [
       {
         source: '/(.*)',
-        headers: process.env.NODE_ENV === 'development' 
-          ? [
-              {
-                key: 'Content-Security-Policy',
-                value: `frame-ancestors ${process.env.REPLIT_DOMAINS || '2b711deb-9881-4c8e-9864-f2078ec28923-00-1z7caopfvm8sp.picard.replit.dev'} localhost:5000 0.0.0.0:5000;`,
-              },
-            ]
-          : [
-              {
-                key: 'X-Frame-Options',
-                value: 'SAMEORIGIN',
-              },
-            ],
+        headers: [
+          // Security headers
+          {
+            key: 'X-Frame-Options',
+            value: 'SAMEORIGIN',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
+          // Set CSP to allow Firebase auth and other necessary domains
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.firebaseio.com",
+              `connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebase.com ${firebaseAuthDomain} wss://*.firebaseio.com`,
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+              "font-src 'self' https://fonts.gstatic.com",
+              "img-src 'self' data: https: blob:",
+              "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
+              "media-src 'self' https: blob:",
+            ].join('; '),
+          },
+          // Allow cross-origin authentication for development
+          ...(process.env.NODE_ENV === 'development' ? [
+            {
+              key: 'Access-Control-Allow-Origin',
+              value: '*',
+            },
+            {
+              key: 'Access-Control-Allow-Methods',
+              value: 'GET, POST, PUT, DELETE, OPTIONS',
+            },
+            {
+              key: 'Access-Control-Allow-Headers',
+              value: 'X-Requested-With, Content-Type, Authorization',
+            },
+          ] : []),
+        ],
       },
     ];
   },
@@ -142,15 +176,29 @@ const nextConfig: NextConfig = {
     ],
   },
    env: {
+    // Firebase Configuration
     NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
     NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
     NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
     NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
     NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
     NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    NEXT_PUBLIC_TENOR_API_KEY: process.env.TENOR_API_KEY,
+    NEXT_PUBLIC_MEASUREMENT_ID: process.env.NEXT_PUBLIC_MEASUREMENT_ID,
+    
+    // External Services
+    NEXT_PUBLIC_TENOR_API_KEY: process.env.NEXT_PUBLIC_TENOR_API_KEY,
     NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
     NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET: process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET,
+    
+    // Runtime Environment
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL_ENV: process.env.VERCEL_ENV || 'development',
+    
+    // Development Settings
+    NEXT_PUBLIC_DEV_MODE: process.env.NODE_ENV === 'development' ? 'true' : 'false',
+    NEXT_PUBLIC_APP_URL: process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000'
   },
 };
 

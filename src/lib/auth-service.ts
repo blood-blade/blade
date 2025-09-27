@@ -16,16 +16,54 @@ const auth = firebaseAuth!;
 
 export class AuthError extends Error {
   code: string;
-  constructor(message: string, code: string) {
+  details?: Record<string, unknown>;
+  constructor(message: string, code: string, details?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.name = 'AuthError';
+    this.details = details;
+  }
+
+  static fromFirebaseError(error: any): AuthError {
+    const details = {
+      original: {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      },
+      context: {
+        timestamp: new Date().toISOString(),
+        authInitialized: !!auth,
+        hasCurrentUser: !!auth?.currentUser
+      }
+    };
+
+    return new AuthError(
+      error.message || 'An authentication error occurred',
+      error.code || 'auth/unknown',
+      details
+    );
   }
 }
 
-// Debug function
+// Enhanced debug logging
 const logDebug = (message: string, data?: any) => {
-  console.log(`[Auth Service] ${message}`, data || '');
+  const timestamp = new Date().toISOString();
+  const context = {
+    message,
+    data: data || null,
+    auth: {
+      initialized: !!auth,
+      hasUser: !!auth?.currentUser,
+      persistence: auth?.persistence || 'unknown'
+    },
+    runtime: {
+      timestamp,
+      userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'server',
+      platform: typeof window !== 'undefined' ? window.navigator.platform : 'server'
+    }
+  };
+  console.log(`[Auth Service] ${message}`, context);
 };
 
 export const authService = {
@@ -215,9 +253,13 @@ export const authService = {
       
       // Log the current authentication configuration
       console.log('Current auth configuration:', {
-        persistenceType: auth.persistence ? auth.persistence.type : 'none',
         currentAuthDomain: auth.config.authDomain,
-        signInMethods: await auth.fetchSignInMethodsForEmail('test@example.com').catch((e: Error) => 'fetch-failed')
+        providerData: auth.currentUser?.providerData || [],
+        currentUser: auth.currentUser ? {
+          uid: auth.currentUser.uid,
+          email: auth.currentUser.email,
+          emailVerified: auth.currentUser.emailVerified
+        } : null
       });
       
       // Set custom parameters for better UX

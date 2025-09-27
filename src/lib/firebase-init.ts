@@ -1,12 +1,51 @@
-import { initializeApp, getApps } from 'firebase/app';
+import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { 
   browserLocalPersistence, 
-  indexedDBLocalPersistence, 
+  indexedDBLocalPersistence,
+  browserSessionPersistence,
   initializeAuth,
-  getAuth
+  getAuth,
+  Auth,
+  setPersistence
 } from 'firebase/auth';
 
-let app;
+let app: FirebaseApp;
+
+// Function to validate Firebase configuration
+function validateFirebaseConfig() {
+  const requiredConfigs = {
+    apiKey: firebaseConfig.apiKey,
+    authDomain: firebaseConfig.authDomain,
+    projectId: firebaseConfig.projectId,
+    storageBucket: firebaseConfig.storageBucket,
+    messagingSenderId: firebaseConfig.messagingSenderId,
+    appId: firebaseConfig.appId
+  } as const;
+
+  // Check for missing required values
+  const missingKeys = Object.entries(requiredConfigs)
+    .filter(([_, value]) => !value)
+    .map(([key]) => key);
+  
+  if (missingKeys.length > 0) {
+    throw new Error(`Missing required Firebase configuration keys: ${missingKeys.join(', ')}`);
+  }
+
+  // Validate auth domain format
+  const authDomain = firebaseConfig.authDomain;
+  if (!authDomain || !authDomain.includes('.') || !authDomain.includes('firebaseapp.com')) {
+    throw new Error('Invalid authDomain format. Must be a valid Firebase domain');
+  }
+}
+
+// Get Firebase instance for server-side operations
+function getServerSideFirebase() {
+  const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+  return { 
+    app, 
+    auth: getAuth(app)
+  };
+}
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -31,33 +70,79 @@ if (!firebaseConfig.projectId) {
 }
 
 // Initialize Firebase early
-export function initializeFirebase() {
+export async function initializeFirebase() {
   try {
-    // Debug: Log Firebase config
-    console.log('Firebase Config:', {
+    // Validate environment
+    if (typeof window === 'undefined') {
+      console.warn('[Firebase Init] Running in server environment, using minimal initialization');
+      return getServerSideFirebase();
+    }
+
+    // Enhanced config validation
+    validateFirebaseConfig();
+    
+    // Debug: Log Firebase config status
+    const configStatus = {
       apiKey: !!firebaseConfig.apiKey,
       authDomain: !!firebaseConfig.authDomain,
       projectId: !!firebaseConfig.projectId,
-      hasAllRequired: !!(firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId)
-    });
+      storageBucket: !!firebaseConfig.storageBucket,
+      messagingSenderId: !!firebaseConfig.messagingSenderId,
+      appId: !!firebaseConfig.appId,
+      currentDomain: typeof window !== 'undefined' ? window.location.hostname : 'server-side',
+      hasAllRequired: !!(
+        firebaseConfig.apiKey && 
+        firebaseConfig.authDomain && 
+        firebaseConfig.projectId && 
+        firebaseConfig.storageBucket && 
+        firebaseConfig.messagingSenderId && 
+        firebaseConfig.appId
+      )
+    };
+    
+    console.log('[Firebase Init] Configuration status:', configStatus);
     
     // Initialize or get the Firebase app
     app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
-    let auth;
+    let auth: Auth;
     try {
-      // Try to initialize auth with persistence
-      auth = initializeAuth(app, {
-        persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-        popupRedirectResolver: undefined
-      });
-    } catch (authError: any) {
-      if (authError.code === 'auth/already-initialized') {
-        // If auth is already initialized, get the existing instance
+      if (getApps().length) {
+        // Use getAuth for existing app
         auth = getAuth(app);
       } else {
-        throw authError;
+        // Initialize new auth with persistence
+        auth = initializeAuth(app, {
+          persistence: [
+            indexedDBLocalPersistence,
+            browserLocalPersistence,
+            browserSessionPersistence
+          ]
+        });
+
+        // Ensure persistence is set
+        await setPersistence(auth, browserLocalPersistence);
       }
+
+      // Validate auth configuration
+      if (!auth.config.authDomain) {
+        throw new Error('Auth domain is not configured. Check NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN');
+      }
+
+      // Validate current domain matches auth domain or is localhost
+      const currentDomain = window.location.hostname;
+      if (currentDomain !== 'localhost' && 
+          !auth.config.authDomain.includes(currentDomain)) {
+        console.warn(`[Firebase Init] Domain mismatch - current: ${currentDomain}, auth: ${auth.config.authDomain}`);
+      }
+
+    } catch (authError: any) {
+      console.error('[Firebase Init] Auth initialization error:', {
+        code: authError.code,
+        message: authError.message,
+        stack: authError.stack
+      });
+      throw authError;
     }
 
     return { app, auth };
@@ -68,7 +153,7 @@ export function initializeFirebase() {
 }
 
 // Initialize with retry mechanism
-function initializeWithRetry(maxRetries = 3): { app: any, auth: any } {
+async function initializeWithRetry(maxRetries = 3): Promise<{ app: FirebaseApp, auth: Auth }> {
   let lastError;
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -91,5 +176,7 @@ function initializeWithRetry(maxRetries = 3): { app: any, auth: any } {
   throw lastError;
 }
 
-// Initialize with retry mechanism
-export const { app: firebaseApp, auth: firebaseAuth } = initializeWithRetry();
+// Initialize Firebase instance
+const instance = await initializeWithRetry();
+export const firebaseApp = instance.app;
+export const firebaseAuth = instance.auth;
