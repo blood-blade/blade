@@ -32,33 +32,78 @@ async function uploadToCloudinaryXHR(
   cloudName: string,
   uploadPreset: string
 ): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', uploadPreset);
-    
-    // Add params specific to profile image uploads
-    formData.append('folder', 'profile_images');
-    formData.append('transformation', 'c_fill,w_400,h_400');
+  const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', uploadPreset);
+  formData.append('timestamp', String(Date.now())); // Prevent caching
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      mode: 'cors',
+      credentials: 'omit',
+      headers: {
+        'Accept': 'application/json'
+      },
+      signal: AbortSignal.timeout(30000) // 30 second timeout
+    });
 
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState === 4) {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try { resolve(JSON.parse(xhr.responseText)); }
-          catch (e) { reject(new Error('Invalid JSON response from Cloudinary')); }
-        } else {
-          reject(new Error(`Cloudinary upload failed: ${xhr.status} ${xhr.responseText}`));
-        }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Cloudinary upload failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+        url,
+        fileType: file.type,
+        fileSize: file.size
+      });
+
+      if (response.status === 413) {
+        throw new Error('File size exceeds server limits');
+      } else if (response.status === 401 || response.status === 403) {
+        throw new Error('Upload not authorized. Please check your Cloudinary configuration.');
       }
-    };
 
-    xhr.onerror = () => reject(new Error('Network error during Cloudinary upload'));
-    xhr.send(formData);
-  });
+      throw new Error(`Cloudinary upload failed: ${response.status} - ${response.statusText}. ${errorText}`);
+    }
+
+    const data = await response.json();
+    if (!data.secure_url) {
+      console.error('Invalid Cloudinary response:', data);
+      throw new Error('Invalid response: missing secure_url');
+    }
+
+    console.log('Upload successful:', {
+      publicId: data.public_id,
+      url: data.secure_url,
+      format: data.format
+    });
+
+    return data;
+  } catch (error: any) {
+    console.error('Upload error:', error, {
+      url,
+      fileType: file.type,
+      fileSize: file.size
+    });
+    
+    if (error.name === 'TimeoutError') {
+      throw new Error('Upload timed out. Please try again with a smaller file.');
+    }
+    
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      throw new Error('Network error: Could not connect to Cloudinary. Please check your internet connection.');
+    }
+    
+    if (error.message.includes('Failed to execute') && error.message.includes('fetch')) {
+      throw new Error('Browser error: The request was blocked. Please check your browser settings and extensions.');
+    }
+    
+    throw error;
+  }
 }
 
 function ProfileSkeleton() {
