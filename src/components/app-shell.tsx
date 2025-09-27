@@ -68,132 +68,105 @@ export async function uploadToCloudinaryXHR(
     throw new Error('File is empty');
   }
 
-  return new Promise((resolve, reject) => {
-    // Use auto upload endpoint to handle both images and videos
-    const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', uploadPreset);
-    
-    // Add timestamp to prevent caching issues
-    formData.append('timestamp', String(Date.now()));
-    
-    // Add resource type hints
-    if (file.type.startsWith('image/')) {
-      formData.append('resource_type', 'image');
-    } else if (file.type.startsWith('video/')) {
-      formData.append('resource_type', 'video');
+  const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', uploadPreset);
+  formData.append('timestamp', String(Date.now())); // Prevent caching
+  
+  // Add resource type hints
+  if (file.type.startsWith('image/')) {
+    formData.append('resource_type', 'image');
+  } else if (file.type.startsWith('video/')) {
+    formData.append('resource_type', 'video');
+  }
+
+  console.log('Starting upload with config:', {
+    url,
+    cloudName,
+    uploadPreset,
+    fileType: file.type,
+    fileSize: file.size
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      mode: 'cors',
+      credentials: 'omit',
+      headers: {
+        'Accept': 'application/json'
+      },
+      signal: AbortSignal.timeout(30000) // 30 second timeout
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Cloudinary upload failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+        url,
+        fileType: file.type,
+        fileSize: file.size
+      });
+
+      // Add custom error handling for common cases
+      if (response.status === 413) {
+        throw new Error('413: File size exceeds server limits');
+      } else if (response.status === 401 || response.status === 403) {
+        throw new Error('Upload not authorized. Please check your Cloudinary configuration.');
+      }
+
+      throw new Error(`Cloudinary upload failed: ${response.status} - ${response.statusText}. ${errorText}`);
     }
 
-    console.log('Starting upload with config:', {
+    const data = await response.json();
+    if (!data.secure_url) {
+      console.error('Invalid Cloudinary response:', data);
+      throw new Error('Invalid response: missing secure_url');
+    }
+
+    console.log('Upload successful:', {
+      publicId: data.public_id,
+      url: data.secure_url,
+      format: data.format,
+      resourceType: data.resource_type,
+      bytes: data.bytes,
+      duration: data.duration
+    });
+
+    return {
+      secure_url: data.secure_url,
+      resource_type: data.resource_type,
+      duration: data.duration,
+      format: data.format,
+      bytes: data.bytes,
+      public_id: data.public_id
+    };
+  } catch (error: any) {
+    console.error('Upload error:', error, {
       url,
-      cloudName,
-      uploadPreset,
       fileType: file.type,
       fileSize: file.size
     });
-
-      // Modern fetch-based upload with proper error handling
-    try {
-      console.log('Starting upload to Cloudinary:', {
-        url,
-        cloudName,
-        uploadPreset,
-        fileType: file.type,
-        fileSize: file.size
-      });
-
-      // Create AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      const response = await fetch(url, {
-        method: 'POST',
-        body: formData,
-        mode: 'cors',
-        credentials: 'omit',
-        headers: {
-          'Accept': 'application/json'
-        },
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId); // Clear timeout if request completes
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Cloudinary upload failed:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText,
-          url,
-          cloudName,
-          fileType: file.type,
-          fileSize: file.size,
-          headers: Object.fromEntries(response.headers)
-        });
-
-        // Add custom error handling for common cases
-        if (response.status === 413) {
-          throw new Error('413: File size exceeds server limits');
-        } else if (response.status === 401 || response.status === 403) {
-          throw new Error('Upload not authorized. Please check your Cloudinary configuration.');
-        }
-
-        throw new Error(`Cloudinary upload failed: ${response.status} - ${response.statusText}. ${errorText}`);
-      }
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (error) {
-        console.error('Error parsing Cloudinary response:', error);
-        throw new Error('Invalid response format from upload service');
-      }
-
-      if (!data.secure_url) {
-        console.error('Invalid Cloudinary response:', data);
-        throw new Error('Invalid response: missing secure_url');
-      }
-
-      console.log('Upload successful:', {
-        publicId: data.public_id,
-        url: data.secure_url,
-        format: data.format,
-        resourceType: data.resource_type,
-        bytes: data.bytes,
-        duration: data.duration
-      });
-
-      return {
-        secure_url: data.secure_url,
-        resource_type: data.resource_type,
-        duration: data.duration,
-        format: data.format,
-        bytes: data.bytes,
-        public_id: data.public_id
-      };
-    } catch (error: any) {
-      console.error('Upload error:', error, {
-        url,
-        cloudName,
-        uploadPreset,
-        fileType: file.type,
-        fileSize: file.size
-      });
-      
-      // Enhanced error reporting
-      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-        throw new Error('Network error: Could not connect to Cloudinary. Please check your internet connection.');
-      }
-      
-      if (error.message.includes('Failed to execute \'fetch\'')) {
-        throw new Error('Browser error: The request was blocked. Please check your browser settings and extensions.');
-      }
-      
-      throw error;
+    
+    if (error.name === 'TimeoutError') {
+      throw new Error('Upload timed out. Please try again or use a smaller file.');
     }
-  });
+    
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      throw new Error('Network error: Could not connect to Cloudinary. Please check your internet connection.');
+    }
+    
+    if (error.message.includes('Failed to execute') && error.message.includes('fetch')) {
+      throw new Error('Browser error: The request was blocked. Please check your browser settings and extensions.');
+    }
+    
+    throw error;
+  }
+}
 }
 
 
