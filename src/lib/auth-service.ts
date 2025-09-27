@@ -55,7 +55,7 @@ const logDebug = (message: string, data?: any) => {
     auth: {
       initialized: !!auth,
       hasUser: !!auth?.currentUser,
-      persistence: auth?.persistence || 'unknown'
+      config: auth?.config || 'unknown'
     },
     runtime: {
       timestamp,
@@ -182,7 +182,7 @@ export const authService = {
       console.log('Firebase auth state:', {
         isInitialized: !!auth,
         hasCurrentUser: !!auth.currentUser,
-        isPersistenceSet: auth.persistence,
+        hasConfig: !!auth.config,
         currentURL: typeof window !== 'undefined' ? window.location.href : 'not-browser',
         currentHostname: typeof window !== 'undefined' ? window.location.hostname : 'not-browser'
       });
