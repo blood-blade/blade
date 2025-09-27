@@ -28,8 +28,11 @@ export function usePrefetch<T>(
 ) {
   const queryClient = useQueryClient();
   const defaultOptions = {
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 30, // 30 minutes
+    staleTime: 1000 * 60 * 15, // 15 minutes
+    gcTime: 1000 * 60 * 60, // 1 hour
+    cacheTime: 1000 * 60 * 30, // 30 minutes
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
     ...options,
   };
 

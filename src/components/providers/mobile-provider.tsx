@@ -6,15 +6,18 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 // Use a more generic name for the hook
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(false);
+  
   useEffect(() => {
     const media = window.matchMedia(query);
-    if (media.matches !== matches) {
-      setMatches(media.matches);
-    }
-    const listener = () => setMatches(media.matches);
-    window.addEventListener('resize', listener);
-    return () => window.removeEventListener('resize', listener);
-  }, [matches, query]);
+    setMatches(media.matches); // Initial state
+
+    // Use the more efficient matchMedia listener
+    const listener = (e: MediaQueryListEvent) => setMatches(e.matches);
+    media.addListener(listener); // More efficient than resize event
+    
+    return () => media.removeListener(listener);
+  }, [query]); // Remove matches dependency to prevent unnecessary re-renders
+  
   return matches;
 }
 

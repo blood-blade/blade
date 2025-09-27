@@ -38,7 +38,18 @@ const messageVariants = {
     animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.2, ease: [0.25, 1, 0.5, 1] } },
 };
 
+import { getPerformanceConfig } from '@/utils/performance';
+
+const { imageQuality } = getPerformanceConfig();
+
 function MessageBubble({ message, sender, isCurrentUser, progress, onCancelUpload, onMessageAction, onReply, isRead }: MessageBubbleProps) {
+    // Optimize image quality based on device capabilities
+    const getOptimizedImageUrl = (url: string) => {
+        if (imageQuality === 'low') {
+            return url.replace('/upload/', '/upload/q_auto,f_auto,w_600/');
+        }
+        return url.replace('/upload/', '/upload/q_auto,f_auto/');
+    };
   if (!sender) {
     return (
         <div className={cn('group flex w-full items-start gap-3', isCurrentUser && 'flex-row-reverse')}>

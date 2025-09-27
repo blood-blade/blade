@@ -24,15 +24,19 @@ setPersistence(auth, browserSessionPersistence).catch(error => {
   console.error('Failed to set persistence:', error);
 });
 
-// Set up auth state monitoring
+// Set up auth state monitoring with debouncing
 let authStatePromise: Promise<void> | null = null;
+let authStateTimeout: NodeJS.Timeout;
 const waitForAuthState = () => {
   if (!authStatePromise) {
     authStatePromise = new Promise((resolve) => {
-      const unsubscribe = onAuthStateChanged(auth, (user) => {
-        unsubscribe();
-        resolve();
-      });
+      if (authStateTimeout) clearTimeout(authStateTimeout);
+      authStateTimeout = setTimeout(() => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+          unsubscribe();
+          resolve();
+        });
+      }, 100); // Debounce auth state changes
     });
   }
   return authStatePromise;
