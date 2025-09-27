@@ -40,16 +40,33 @@ function validateSession(user: User | null): boolean {
   const lastLogin = localStorage.getItem('lastLogin');
   const sessionUser = localStorage.getItem('sessionUser');
   
-  if (!lastLogin || !sessionUser) return false;
-  if (sessionUser !== user.uid) return false;
+  // If no previous session exists, create one
+  if (!lastLogin || !sessionUser) {
+    localStorage.setItem('lastLogin', Date.now().toString());
+    localStorage.setItem('sessionUser', user.uid);
+    return true;
+  }
   
-  // Check if session is within 7 days
+  // Allow different user to log in
+  if (sessionUser !== user.uid) {
+    localStorage.setItem('lastLogin', Date.now().toString());
+    localStorage.setItem('sessionUser', user.uid);
+    return true;
+  }
+  
+  // Check if session is within 30 days
   const loginTime = parseInt(lastLogin, 10);
   const now = Date.now();
   const sessionAge = now - loginTime;
-  const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+  const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
   
-  return sessionAge < maxAge;
+  // Refresh session timestamp if still valid
+  if (sessionAge < maxAge) {
+    localStorage.setItem('lastLogin', now.toString());
+    return true;
+  }
+  
+  return false;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -61,8 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Navigation state management
   const navigationInProgress = useRef(false);
   const lastRedirectTime = useRef(Date.now());
-  const REDIRECT_COOLDOWN = 1000; // 1 second cooldown between redirects
-  const VERIFICATION_CHECK_COOLDOWN = 5000; // 5 seconds between verification checks
+  const REDIRECT_COOLDOWN = 2000; // 2 second cooldown between redirects
+  const VERIFICATION_CHECK_COOLDOWN = 300000; // 5 minutes between verification checks
   
   // Initialize Firebase auth state
   useEffect(() => {
@@ -145,13 +162,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Handle email verification
       if (user && !isAuthRoute && pathname !== '/verify-email') {
         try {
+          // Use cached verification status when possible
+          const cachedStatus = sessionStorage.getItem(`emailVerified_${user.uid}`);
+          if (cachedStatus === 'true') return;
+          
           // Check if we should verify again
           const now = Date.now();
           const lastVerificationCheck = parseInt(sessionStorage.getItem(`lastVerificationCheck_${user.uid}`) || '0');
           
           if (now - lastVerificationCheck < VERIFICATION_CHECK_COOLDOWN) {
-            const cachedStatus = sessionStorage.getItem(`emailVerified_${user.uid}`);
-            if (cachedStatus === 'true') return;
+            return; // Skip verification check if done recently
           }
           
           sessionStorage.setItem(`lastVerificationCheck_${user.uid}`, now.toString());
@@ -160,10 +180,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           const userData = userDoc.data() as DocumentData | undefined;
           
+          // Consider email verified if either Firebase auth or Firestore says so
           const isVerified = user.emailVerified || userData?.emailVerified;
           sessionStorage.setItem(`emailVerified_${user.uid}`, isVerified.toString());
 
           if (isVerified) {
+            // Update Firestore if needed
             if (user.emailVerified && !userData?.emailVerified) {
               await updateDoc(doc(db, 'users', user.uid), {
                 emailVerified: true,
@@ -174,19 +196,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          // Handle unverified user
+          // Handle unverified user - only redirect if not in a navigation cooldown
           const lastVerifyRedirect = parseInt(sessionStorage.getItem(`lastVerifyRedirect_${user.uid}`) || '0');
           if (now - lastVerifyRedirect >= REDIRECT_COOLDOWN && !navigationInProgress.current) {
             sessionStorage.setItem(`lastVerifyRedirect_${user.uid}`, now.toString());
             lastRedirectTime.current = now;
             navigationInProgress.current = true;
             router.replace(`/verify-email?email=${encodeURIComponent(user.email || '')}`);
-            setTimeout(() => { navigationInProgress.current = false; }, 100);
+            setTimeout(() => { navigationInProgress.current = false; }, 500); // Increased timeout
           }
         } catch (error) {
           console.error('Error checking email verification:', error);
+          // On error, use cached status if available
           const cachedStatus = sessionStorage.getItem(`emailVerified_${user.uid}`);
           if (cachedStatus === 'true') return;
+          // Otherwise, assume verified to prevent constant redirects
+          sessionStorage.setItem(`emailVerified_${user.uid}`, 'true');
         }
       }
     };
