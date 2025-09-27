@@ -52,6 +52,10 @@ const continueConversationFlow = ai.defineFlow(
   },
   async input => {
     try {
+        if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
+            throw new Error("Gemini API key not configured");
+        }
+
         const {output} = await prompt(input);
         if (!output) {
             throw new Error("No output from AI prompt.");
@@ -59,9 +63,15 @@ const continueConversationFlow = ai.defineFlow(
         return output;
     } catch (error: any) {
         console.error("Error in continueConversationFlow:", error);
-        // Check for specific rate limit error message
-        if (error.message && error.message.includes('429')) {
-             return { reply: "I've been talking a lot today and need a little break. Please try again later. You may need to check your API plan and billing details." };
+        // Check for specific error types
+        if (error.message?.includes('429')) {
+            return { reply: "I've been talking a lot today and need a little break. Please try again later. You may need to check your API plan and billing details." };
+        }
+        if (error.message?.includes('API key')) {
+            return { reply: "I'm not properly configured right now. Please check the Gemini API key configuration." };
+        }
+        if (error.message?.includes('unauthorized') || error.message?.includes('403')) {
+            return { reply: "I don't have proper authorization. Please verify the Gemini API key is valid." };
         }
         return { reply: "Sorry, I'm having trouble connecting right now. Please try again in a moment." };
     }
