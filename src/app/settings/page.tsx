@@ -1,20 +1,10 @@
 
 'use client';
 
-import { useEffect, Suspense } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { MobileSettingsMenu } from '@/components/settings/mobile-settings-menu';
 import { useMobileDesign } from '@/components/providers/mobile-provider';
-import dynamic from 'next/dynamic';
-import { SettingsSkeleton } from '@/components/settings';
-
-// Dynamically import settings menu with loading state
-const DynamicMobileSettingsMenu = dynamic(
-  () => import('@/components/settings').then(mod => mod.MobileSettingsMenu),
-  {
-    loading: () => <SettingsSkeleton />,
-    ssr: false
-  }
-);
 
 export default function SettingsPage() {
     const router = useRouter();
@@ -27,111 +17,9 @@ export default function SettingsPage() {
     }, [isMobileView, router]);
 
     if (!isMobileView) {
+        // Render nothing on desktop while redirecting
         return null;
     }
 
-    return (
-        <Suspense fallback={<SettingsSkeleton />}>
-            <DynamicMobileSettingsMenu />
-        </Suspense>
-    );
-}
-import { useEffect, Suspense } from 'react';
-import { useRouter } from 'next/navigation';
-import { useMobileDesign } from '@/components/providers/mobile-provider';
-import dynamic from 'next/dynamic';
-import { SettingsSkeleton } from '@/components/settings/settings-skeleton';
-
-// Dynamically import settings menu with loading state
-const DynamicMobileSettingsMenu = dynamic(
-  () => import('@/components/settings/mobile-settings-menu').then(mod => mod.MobileSettingsMenu),
-  {
-    loading: () => <SettingsSkeleton />,
-    ssr: false
-  }
-);
-
-const settingsItems = [
-    {
-        href: '/settings/profile',
-        icon: User,
-        title: 'Profile',
-        description: 'Manage your public profile information.'
-    },
-    {
-        href: '/settings/account',
-        icon: Shield,
-        title: 'Account',
-        description: 'Manage your account security and data.'
-    },
-    {
-        href: '/settings/notifications',
-        icon: Bell,
-        title: 'Notifications',
-        description: 'Manage how you get notified.'
-    },
-    {
-        href: '/settings/appearance',
-        icon: Palette,
-        title: 'Appearance',
-        description: 'Customize the look and feel of the app.'
-    },
-    {
-        href: '/settings/backgrounds',
-        icon: ImageIcon,
-        title: 'Backgrounds',
-        description: 'Choose your app background.'
-    },
-    {
-        href: '/settings/weather',
-        icon: CloudSun,
-        title: 'Weather',
-        description: 'Customize the weather widget.'
-    },
-    {
-        href: '/settings/feedback',
-        icon: Mail,
-        title: 'Feedback',
-        description: 'Send us your thoughts and suggestions.'
-    }
-]
-
-function MobileSettingsMenu() {
-    return (
-        <div className="p-2 space-y-2">
-            {settingsItems.map(item => (
-                <Link href={item.href} key={item.href} className="flex items-center justify-between p-4 rounded-lg bg-card/50 hover:bg-card/80 transition-colors">
-                    <div className="flex items-center gap-4">
-                        <item.icon className="h-6 w-6 text-primary" />
-                        <div className="flex flex-col">
-                            <span className="font-semibold">{item.title}</span>
-                            <span className="text-sm text-muted-foreground">{item.description}</span>
-                        </div>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                </Link>
-            ))}
-        </div>
-    )
-}
-
-export default function SettingsPage() {
-    const router = useRouter();
-    const { isMobileView } = useMobileDesign();
-
-    useEffect(() => {
-        if (!isMobileView) {
-            router.replace('/settings/profile');
-        }
-    }, [isMobileView, router]);
-
-    if (!isMobileView) {
-        return null;
-    }
-
-    return (
-        <Suspense fallback={<SettingsSkeleton />}>
-            <DynamicMobileSettingsMenu />
-        </Suspense>
-    );
+    return <MobileSettingsMenu />;
 }
