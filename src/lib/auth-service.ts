@@ -15,6 +15,7 @@ import {
 import { doc, setDoc, serverTimestamp, getDoc, updateDoc } from 'firebase/firestore';
 import { auth as firebaseAuth, db } from './firebase';
 import { setupPresence, setOfflineStatus } from './presence-final';
+import { getHighQualityGooglePhotoUrl } from '@/utils/avatar';
 
 // Ensure auth is defined
 const auth = firebaseAuth!;
@@ -407,12 +408,19 @@ export const authService = {
         userDoc = await getDoc(doc(db, 'users', result.user.uid));
         
         if (!userDoc.exists()) {
+          // Process Google photo URL to ensure high quality
+          let photoURL = result.user.photoURL;
+          if (photoURL && photoURL.includes('googleusercontent.com')) {
+            // Remove size parameter and request a larger image
+            photoURL = photoURL.replace(/=s\d+-c/, '=s400-c');
+          }
+
           // Create new user document
           await setDoc(doc(db, 'users', result.user.uid), {
             uid: result.user.uid,
             email: result.user.email ?? '',
             name: result.user.displayName ?? (result.user.email ? result.user.email.split('@')[0] : 'User'),
-            photoURL: result.user.photoURL ?? '',
+            photoURL: photoURL ?? '',
             status: 'online',
             about: '',
             devices: [],
