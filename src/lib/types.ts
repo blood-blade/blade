@@ -41,6 +41,7 @@ export type Message = {
   text: string;
   timestamp: any;
   status: 'sent' | 'delivered' | 'read' | 'sending' | 'error';
+  isAiMessage?: boolean;
   reactions?: MessageReaction[];
   file?: {
     url: string;

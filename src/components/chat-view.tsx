@@ -2,6 +2,7 @@
 'use client';
 import type { Conversation as ConversationType, User, Message as MessageType } from '@/lib/types';
 import { MoreVertical, Phone, Video, Bot, X, Reply, ArrowLeft, Trash2, ArrowDown } from 'lucide-react';
+import { geminiService } from '@/lib/gemini-service';
 import { Button } from './ui/button';
 import { UserAvatar } from './user-avatar';
 import { MessageInput } from './message-input';
@@ -178,15 +179,41 @@ const ChatViewComponent = ({
 
 
   const handleSendMessageWithReply = async (messageText: string) => {
-    if (!messageText.trim()) return;
+    if (!messageText.trim() || !chat) return;
     
     try {
-        await activeSendMessage(messageText, replyToMessage?.replyTo || (replyToMessage ? {
+        // Send the user's message
+        const messageReply = replyToMessage?.replyTo || (replyToMessage ? {
             messageId: replyToMessage.id,
             messageText: replyToMessage.text || (replyToMessage.file ? 'Attachment' : ''),
             messageSender: usersCache.get(replyToMessage.senderId)?.name || 'Unknown User'
-        } : undefined));
+        } : undefined);
+        await activeSendMessage(messageText, messageReply);
         setReplyToMessage(null); // Clear reply state after sending
+
+        // Check if the message mentions @gemini and process it
+        if (messageText.includes('@gemini')) {
+            try {
+                const aiResponse = await geminiService.processMessage({
+                    id: crypto.randomUUID(),
+                    senderId: currentUser?.uid || '',
+                    text: messageText,
+                    timestamp: new Date(),
+                    status: 'sent'
+                }, chat.id);
+                
+                if (aiResponse) {
+                    // AI responses are handled directly by AppShell's AI conversation flow
+                    await activeSendMessage(aiResponse);
+                }
+            } catch (error) {
+                toast({
+                    title: 'AI Response Error',
+                    description: 'Could not get a response from Gemini. Please try again.',
+                    variant: 'destructive',
+                });
+            }
+        }
     } catch (e) {
       toast({
           title: 'Error Sending Message',

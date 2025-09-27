@@ -235,7 +235,8 @@ function MessageBubble({ message, sender, isCurrentUser, progress, onCancelUploa
       layout
       className={cn(
         'group flex w-full items-start gap-3 relative',
-        isCurrentUser && 'flex-row-reverse'
+        isCurrentUser && 'flex-row-reverse',
+        message.isAiMessage && 'flex-row bg-transparent'
       )}
       // Swipe to reply gesture
       drag="x"
@@ -248,9 +249,11 @@ function MessageBubble({ message, sender, isCurrentUser, progress, onCancelUploa
       <div
         className={cn(
           'relative flex max-w-[70%] flex-col rounded-xl shadow-md',
-          isCurrentUser
-            ? 'rounded-tr-none bg-gradient-to-br from-gradient-from to-gradient-to text-primary-foreground animated-gradient'
-            : 'rounded-tl-none bg-card',
+          message.isAiMessage
+            ? 'rounded-tl-none bg-green-100 dark:bg-green-900/20 text-foreground border border-green-200 dark:border-green-800'
+            : isCurrentUser
+              ? 'rounded-tr-none bg-gradient-to-br from-gradient-from to-gradient-to text-primary-foreground animated-gradient'
+              : 'rounded-tl-none bg-card',
             (message.file && !message.text) ? 'p-1.5' : 'px-4 py-2'
         )}
       >

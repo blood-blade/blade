@@ -1,32 +1,47 @@
 import React from 'react';
 
-// URL regex pattern for matching web links
-const URL_PATTERN = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
-
-/**
- * Formats text by making URLs clickable with proper styling
- */
-export function formatText(text: string) {
-  const parts = text.split(URL_PATTERN);
-  const matches = text.match(URL_PATTERN) || [];
+export function formatText(text: string): JSX.Element {
+  const urlRegex = /(\bhttps?:\/\/\S+\b)/g;
+  const geminiMentionRegex = /(@gemini)/g;
   
-  return parts.reduce((acc: React.ReactNode[], part, i) => {
-    if (i > 0 && matches[i - 1]) {
-      acc.push(
-        <a 
-          key={`link-${i}`}
-          href={matches[i - 1]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-500 hover:text-blue-600 hover:underline transition-colors"
-        >
-          {matches[i - 1]}
-        </a>
+  // First split by URLs
+  const urlParts = text.split(urlRegex);
+  
+  return (
+    <>{urlParts.map((part: string, index: number) => {
+      if (part.match(urlRegex)) {
+        return (
+          <a 
+            key={index} 
+            href={part} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-primary underline underline-offset-2"
+          >
+            {part}
+          </a>
+        );
+      }
+      
+      // For non-URL parts, handle @gemini mentions
+      const geminiParts = part.split(geminiMentionRegex);
+      return (
+        <span key={index}>
+          {geminiParts.map((gPart: string, gIndex: number) => {
+            if (gPart === '@gemini') {
+              return (
+                <span
+                  key={gIndex}
+                  className="inline-block bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-1 rounded"
+                >
+                  {gPart}
+                </span>
+              );
+            }
+            return <span key={gIndex}>{gPart}</span>;
+          })}
+        </span>
       );
-    }
-    if (part) {
-      acc.push(<React.Fragment key={`text-${i}`}>{part}</React.Fragment>);
-    }
-    return acc;
-  }, []);
+    })}</>
+  );
 }

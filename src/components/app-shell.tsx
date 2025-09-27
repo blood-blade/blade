@@ -1513,11 +1513,11 @@ useEffect(() => {
   }, [currentUser]);
 
 
-  const activeSendMessage = useCallback((messageText: string, replyTo?: Message['replyTo']): Promise<string> => {
+  const activeSendMessage = useCallback(async (messageText: string, replyTo?: Message['replyTo']): Promise<string> => {
     if (!selectedChat || !currentUser) return Promise.reject("No chat selected");
     if (selectedChat.id === AI_USER_ID) {
-      handleAiConversation(messageText);
-      return Promise.resolve(uuidv4()); // Return a dummy tempId
+      await handleAiConversation(messageText);
+      return Promise.resolve(uuidv4()); // Return a temp ID for AI chat
     } else {
       return handleSendMessage(selectedChat.id, currentUser.uid, messageText, replyTo);
     }
