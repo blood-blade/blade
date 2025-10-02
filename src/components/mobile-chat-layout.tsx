@@ -23,8 +23,8 @@ export function MobileChatLayout() {
 
   return (
     <div
-      className="flex flex-col w-full h-full overflow-hidden z-10"
-      style={{ height: viewportHeight }}
+      className="flex flex-col w-full h-full overflow-hidden z-10 mobile-adjusted"
+      style={{ height: viewportHeight, maxWidth: '100vw' }}
     >
       {/* Only render one main view at a time */}
       {!selectedChat ? (
