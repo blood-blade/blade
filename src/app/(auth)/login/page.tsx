@@ -255,12 +255,23 @@ export default function LoginPage() {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       
-      // Prevent automatic reload
+      // Set persistence to LOCAL before sign-in
+      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      
+      // Prevent automatic reload and set up loading state
       if (typeof window !== 'undefined') {
+        const loadingToast = toast({
+          title: 'Signing in...',
+          description: 'Please wait while we securely log you in.',
+        });
+
         window.onbeforeunload = (e) => {
           e.preventDefault();
           e.returnValue = '';
         };
+
+        // Clean up toast after 3 seconds
+        setTimeout(() => loadingToast.dismiss(), 3000);
       }
 
       const user = await authService.signInWithGoogle();

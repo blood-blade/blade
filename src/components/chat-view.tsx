@@ -38,6 +38,8 @@ import { MessageList } from './message-list';
 import { RightPaneBackground } from './right-pane-background';
 import { Timestamp } from 'firebase/firestore';
 import { useAppShell } from './app-shell';
+import { useVoiceChat } from '@/hooks/voice/use-voice-chat';
+import { VoiceChat } from '@/components/voice-chat/voice-chat';
 
 const AI_USER_ID = 'gemini-ai-chat-bot-7a4b9c1d-f2e3-4d56-a1b2-c3d4e5f6a7b8';
 
@@ -64,6 +66,27 @@ const ChatViewComponent = ({
 }: ChatViewProps) => {
   const { toast } = useToast();
   const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+
+  const {
+    isConnected: isVoiceConnected,
+    isMuted,
+    participants: voiceParticipants,
+    remoteStreams,
+    join: joinVoice,
+    leave: leaveVoice,
+    toggleMute,
+  } = useVoiceChat({
+    userId: currentUser?.uid || '',
+    roomId: chat?.id || '',
+    onError: (error: Error) => {
+      toast({
+        title: 'Voice Chat Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
   const [replyToMessage, setReplyToMessage] = useState<MessageType | null>(null);
   const { chatBackground } = useAppearance();
   const { isMobileView } = useMobileDesign();
@@ -322,7 +345,28 @@ const ChatViewComponent = ({
             </div>
           </button>
         </div>
-        <div className={cn("flex items-center", isAIChat && "hidden")}>
+        <div className={cn("flex items-center gap-2", isAIChat && "hidden")}>
+          {!isVoiceConnected ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={async () => {
+                try {
+                  await joinVoice();
+                  setIsVoiceEnabled(true);
+                } catch (error) {
+                  toast({
+                    title: 'Voice Chat Error',
+                    description: 'Could not join voice chat. Please check your microphone permissions.',
+                    variant: 'destructive',
+                  });
+                }
+              }}
+              title="Join Voice"
+            >
+              <Phone className="h-5 w-5" />
+            </Button>
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon">
@@ -371,6 +415,20 @@ const ChatViewComponent = ({
       {/* FIXED THIS WRAPPER: Changed h-full to flex-1 and added relative */}
       <div className="flex flex-1 flex-col min-h-0 relative">
         <div className="flex-1 min-h-0 overflow-y-auto relative">
+        {isVoiceEnabled && (
+          <VoiceChat
+            participants={voiceParticipants}
+            currentUserId={currentUser.uid}
+            remoteStreams={remoteStreams}
+            isMuted={isMuted}
+            onMuteToggle={toggleMute}
+            onLeave={() => {
+              leaveVoice();
+              setIsVoiceEnabled(false);
+            }}
+            className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border/50"
+          />
+        )}
          {chatBackground && (
           <div className="absolute inset-0 opacity-20 dark:opacity-10">
              {chatBackground && !chatBackground.startsWith('data:image') && (

@@ -38,21 +38,85 @@ export function MobileProvider({ children }: { children: ReactNode }) {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
-    const savedMobileDesign = localStorage.getItem('mobile_redesign');
-    const isEnabled = savedMobileDesign !== null ? savedMobileDesign === 'true' : true;
-    
-    setMobileDesignState(isEnabled);
-    document.body.dataset.mobile = isEnabled ? "true" : "false";
+    // Try to get saved setting from multiple storage options
+    const getSavedSetting = () => {
+      try {
+        // Try IndexedDB first for better persistence
+        const dbRequest = window.indexedDB.open('vibez-settings', 1);
+        
+        dbRequest.onerror = () => {
+          console.warn('IndexedDB access failed, falling back to localStorage');
+        };
 
-    const handleResize = () => {
-        setDimensions({ width: window.innerWidth, height: window.innerHeight });
+        dbRequest.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains('settings')) {
+            db.createObjectStore('settings', { keyPath: 'id' });
+          }
+        };
+
+        // Try localStorage as fallback
+        const saved = localStorage.getItem('mobile_redesign');
+        if (saved !== null) {
+          // Persist to IndexedDB for next time
+          const db = dbRequest.result;
+          const transaction = db.transaction(['settings'], 'readwrite');
+          const store = transaction.objectStore('settings');
+          store.put({ id: 'mobile_redesign', value: saved === 'true' });
+          return saved === 'true';
+        }
+
+        // Default to true if no saved setting
+        return true;
+      } catch (error) {
+        console.warn('Storage access failed:', error);
+        return true;
+      }
+    };
+
+    const isEnabled = getSavedSetting();
+    setMobileDesignState(isEnabled);
+    
+    // Ensure body dataset is set
+    try {
+      document.body.dataset.mobile = isEnabled ? "true" : "false";
+    } catch (error) {
+      console.warn('Failed to set body dataset:', error);
     }
+
+    // Handle resize with debouncing
+    let resizeTimer: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        setDimensions({
+          width: window.innerWidth || document.documentElement.clientWidth,
+          height: window.innerHeight || document.documentElement.clientHeight
+        });
+      }, 250); // Debounce resize events
+    };
+
+    // Handle visibility change for mobile browsers
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const currentSetting = getSavedSetting();
+        if (isMobileDesign !== currentSetting) {
+          setMobileDesignState(currentSetting);
+          document.body.dataset.mobile = currentSetting ? "true" : "false";
+        }
+      }
+    };
+
     window.addEventListener('resize', handleResize);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     handleResize(); // Initial call
     
-    return () => window.removeEventListener('resize', handleResize);
-
-  }, []);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearTimeout(resizeTimer);
+    };
+  }, [isMobileDesign]);
 
   const setIsMobileDesign = (enabled: boolean) => {
     setMobileDesignState(enabled);
