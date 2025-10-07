@@ -17,6 +17,33 @@ interface VoiceChatProps {
   className?: string;
 }
 
+class VoiceChatErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Voice chat error:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 text-sm text-destructive bg-destructive/10 rounded-lg">
+          Voice chat encountered an error. Please try rejoining.
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export function VoiceChat({
   participants,
   currentUserId,
@@ -42,7 +69,8 @@ export function VoiceChat({
   }, [participants, currentUserId]);
 
   return (
-    <div className={cn('flex flex-col', className)}>
+    <VoiceChatErrorBoundary>
+      <div className={cn('flex flex-col', className)}>
       {/* Voice chat header */}
       <div className="flex items-center justify-between p-4">
         <div className="flex items-center gap-2">
@@ -113,14 +141,30 @@ export function VoiceChat({
         <audio
           key={participantId}
           autoPlay
+          playsInline
           ref={(el) => {
             if (el) {
-              el.srcObject = stream;
+              if (el.srcObject !== stream) {
+                el.srcObject = stream;
+              }
+              el.volume = 1.0;
+              
+              // Ensure audio plays when ready
+              const playPromise = el.play();
+              if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                  console.warn('Audio playback failed:', error);
+                });
+              }
             }
+          }}
+          onError={(e) => {
+            console.error('Audio element error:', e);
           }}
           className="hidden"
         />
       ))}
-    </div>
+      </div>
+    </VoiceChatErrorBoundary>
   );
 }

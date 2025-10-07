@@ -67,6 +67,10 @@ const ChatViewComponent = ({
   const { toast } = useToast();
   const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  
+  // Chat type flags
+  const isAIChat = chat?.id === AI_USER_ID;
+  const isGroupChat = chat?.type === 'group';
 
   const {
     isConnected: isVoiceConnected,
@@ -80,6 +84,7 @@ const ChatViewComponent = ({
     userId: currentUser?.uid || '',
     roomId: chat?.id || '',
     onError: (error: Error) => {
+      console.error('Voice chat hook error:', error);
       toast({
         title: 'Voice Chat Error',
         description: error.message,
@@ -87,6 +92,18 @@ const ChatViewComponent = ({
       });
     },
   });
+
+  // Debug check for voice chat initialization
+  useEffect(() => {
+    if (chat && currentUser && !isAIChat) {
+      console.log('Voice chat availability:', {
+        chatId: chat.id,
+        userId: currentUser.uid,
+        isVoiceConnected,
+        hookInitialized: Boolean(joinVoice)
+      });
+    }
+  }, [chat, currentUser, isAIChat, isVoiceConnected, joinVoice]);
   const [replyToMessage, setReplyToMessage] = useState<MessageType | null>(null);
   const { chatBackground } = useAppearance();
   const { isMobileView } = useMobileDesign();
@@ -301,9 +318,17 @@ const ChatViewComponent = ({
     )
   }
   
-  const isAIChat = chat.id === AI_USER_ID;
-  const isGroupChat = chat.type === 'group';
+  // Chat type flags are now declared at the top of the component
   
+  // Debug logging for voice chat state
+  console.log('Voice Chat State:', {
+    isVoiceConnected,
+    isAIChat,
+    chatType: chat.type,
+    userId: currentUser.uid,
+    chatId: chat.id
+  });
+
   const participantForProfile = isAIChat ? usersCache.get(AI_USER_ID) : otherParticipant;
 
   const displayName = chat.name;
@@ -320,8 +345,8 @@ const ChatViewComponent = ({
 
 
   return (
-    <div className="flex h-full w-full flex-col bg-transparent">
-      <header className="flex items-center justify-between border-b border-border/50 bg-card/80 backdrop-blur-xl p-2 sm:p-4 shrink-0 z-10">
+    <div className="flex h-full w-full flex-col bg-transparent overflow-hidden">
+      <header className="flex items-center justify-between border-b border-border/50 bg-card/80 backdrop-blur-xl px-3 py-2 sm:px-4 sm:py-3 shrink-0 z-10 w-full">
         <div className="flex items-center gap-3">
             {isMobileView && onBack ? (
               <Button variant="ghost" size="icon" className="h-10 w-10" onClick={onBack}>
@@ -346,27 +371,67 @@ const ChatViewComponent = ({
           </button>
         </div>
         <div className={cn("flex items-center gap-2", isAIChat && "hidden")}>
-          {!isVoiceConnected ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={async () => {
-                try {
-                  await joinVoice();
-                  setIsVoiceEnabled(true);
-                } catch (error) {
-                  toast({
-                    title: 'Voice Chat Error',
-                    description: 'Could not join voice chat. Please check your microphone permissions.',
-                    variant: 'destructive',
+          {/* Voice Chat Buttons */}
+          {!isVoiceConnected && !isAIChat && (
+            <>
+              {/* Voice Call Button */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={async () => {
+                  console.log('Voice call button clicked', {
+                    currentUser,
+                    chatId: chat?.id,
+                    isVoiceConnected,
+                    joinVoiceFunction: Boolean(joinVoice)
                   });
-                }
-              }}
-              title="Join Voice"
-            >
-              <Phone className="h-5 w-5" />
-            </Button>
-          ) : null}
+
+                  if (!currentUser?.uid || !chat?.id) {
+                    console.error('Missing required data:', { userId: currentUser?.uid, chatId: chat?.id });
+                    toast({
+                      title: 'Voice Chat Error',
+                      description: 'Cannot start voice chat: missing user or chat information.',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
+
+                  try {
+                    console.log('Attempting to join voice chat:', { 
+                      userId: currentUser.uid, 
+                      roomId: chat.id,
+                      chatType: chat.type 
+                    });
+
+                    if (!joinVoice) {
+                      throw new Error('Voice chat join function not initialized');
+                    }
+
+                    await joinVoice();
+                    console.log('Join voice call successful');
+                    setIsVoiceEnabled(true);
+                    toast({
+                      title: 'Voice Chat',
+                      description: 'Joined voice chat successfully.',
+                    });
+                  } catch (error) {
+                    console.error('Voice chat join error:', error);
+                    toast({
+                      title: 'Voice Chat Error',
+                      description: error instanceof Error 
+                        ? error.message 
+                        : 'Could not join voice chat. Please check your microphone permissions.',
+                      variant: 'destructive',
+                    });
+                  }
+                }}
+              >
+                <Phone className="h-4 w-4" />
+                {chat.type === 'private' ? 'Voice Call' : 'Join Voice'}
+              </Button>
+            </>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon">
@@ -413,9 +478,9 @@ const ChatViewComponent = ({
       </header>
 
       {/* FIXED THIS WRAPPER: Changed h-full to flex-1 and added relative */}
-      <div className="flex flex-1 flex-col min-h-0 relative">
-        <div className="flex-1 min-h-0 overflow-y-auto relative">
-        {isVoiceEnabled && (
+      <div className="flex flex-1 flex-col min-h-0 relative w-full max-w-full">
+        <div className="flex-1 min-h-0 overflow-y-auto relative w-full">
+        {(isVoiceEnabled || isVoiceConnected) && (
           <VoiceChat
             participants={voiceParticipants}
             currentUserId={currentUser.uid}
@@ -423,6 +488,7 @@ const ChatViewComponent = ({
             isMuted={isMuted}
             onMuteToggle={toggleMute}
             onLeave={() => {
+              console.log('Leaving voice chat');
               leaveVoice();
               setIsVoiceEnabled(false);
             }}
@@ -469,7 +535,7 @@ const ChatViewComponent = ({
         </div>
       )}
     </div>
-    <div className="sticky bottom-0 left-0 w-full bg-background z-10">
+    <div className="sticky bottom-0 left-0 right-0 w-full bg-background z-10 px-2 sm:px-4 pb-safe">
       {replyToMessage && (
         <div className="p-2 px-4 border-t border-border/50 bg-background/50 flex justify-between items-center">
           <div className="flex items-center gap-2">

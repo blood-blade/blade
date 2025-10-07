@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { VoiceRoom } from '@/lib/voice/voice-room';
 import {
   VoiceRoomParticipant,
@@ -26,13 +26,35 @@ export function useVoiceChat({
     VoiceConnectionState.DISCONNECTED
   );
 
+  // Validate required parameters
+  const isValid = useMemo(() => {
+    if (!userId || !roomId) {
+      console.warn('VoiceChat: userId and roomId are required');
+      return false;
+    }
+    if (userId.length < 1 || roomId.length < 1) {
+      console.warn('VoiceChat: userId and roomId cannot be empty');
+      return false;
+    }
+    return true;
+  }, [userId, roomId]);
+
   // Initialize voice room
   useEffect(() => {
+    console.log('Initializing voice room:', { userId, roomId });
+    
+    if (!userId || !roomId) {
+      console.warn('Missing required data for voice room:', { userId, roomId });
+      return;
+    }
+
     const voiceRoom = new VoiceRoom(userId, roomId);
     voiceRoomRef.current = voiceRoom;
+    console.log('Voice room created:', { voiceRoom: Boolean(voiceRoom) });
 
     // Setup event handlers
     voiceRoom.on(VoiceRoomEvent.PARTICIPANT_JOINED, (participant) => {
+      console.log('Participant joined:', participant);
       setParticipants((prev) => [...prev, participant]);
     });
 
@@ -86,15 +108,26 @@ export function useVoiceChat({
 
   // Join voice room
   const join = useCallback(async () => {
+    if (!isValid) {
+      const error = new Error('Cannot join voice chat: Invalid userId or roomId');
+      onError?.(error);
+      return;
+    }
+
     if (voiceRoomRef.current) {
       try {
+        console.log('Joining voice chat:', { userId, roomId });
         await voiceRoomRef.current.join();
         setIsConnected(true);
       } catch (error) {
+        console.error('Voice chat join error:', error);
         onError?.(error as Error);
       }
+    } else {
+      console.error('Voice chat not initialized');
+      onError?.(new Error('Voice chat not initialized'));
     }
-  }, [onError]);
+  }, [isValid, userId, roomId, onError]);
 
   // Leave voice room
   const leave = useCallback(() => {

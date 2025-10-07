@@ -1,38 +1,32 @@
-import { WebSocket } from 'ws';
-import { NextApiRequest } from 'next';
-import { Server } from 'socket.io';
 import { VoiceSignalingServer } from '@/lib/voice/signaling-server';
 
 const voiceSignalingServer = new VoiceSignalingServer();
 
-export default function handler(req: NextApiRequest, res: any) {
-  if (!res.socket.server.io) {
-    console.log('Starting Socket.io server...');
-    const io = new Server(res.socket.server);
-    res.socket.server.io = io;
-
-    io.on('connection', (socket) => {
-      const userId = socket.handshake.auth.userId;
-      if (!userId) {
-        socket.disconnect();
-        return;
-      }
-
-      // Create WebSocket wrapper for Socket.io
-      // Create WebSocket wrapper for Socket.io with correct OPEN state value
-      const ws = {
-        send: (data: string) => socket.emit('message', data),
-        on: (event: string, callback: (data: unknown) => void) => socket.on(event, callback),
-        readyState: 1, // WebSocket.OPEN value
-      };
-
-      voiceSignalingServer.handleConnection(ws as any, userId);
-
-      socket.on('disconnect', () => {
-        ws.readyState = WebSocket.CLOSED;
-      });
-    });
+export function GET(request: Request) {
+  const upgradeHeader = request.headers.get('upgrade');
+  if (upgradeHeader !== 'websocket') {
+    return new Response('Expected websocket connection', { status: 426 });
   }
 
-  res.end();
+  try {
+    // @ts-ignore - Next.js types are not up to date with WebSocket
+    const { socket: ws, response } = new WebSocket(request);
+    
+    // Extract user ID from URL parameters
+    const url = new URL(request.url);
+    const userId = url.searchParams.get('userId');
+    
+    if (!userId) {
+      ws.close(4000, 'User ID is required');
+      return response;
+    }
+
+    // Handle the WebSocket connection
+    voiceSignalingServer.handleConnection(ws, userId);
+
+    return response;
+  } catch (err) {
+    console.error('WebSocket connection error:', err);
+    return new Response('Internal Server Error', { status: 500 });
+  }
 }

@@ -129,10 +129,10 @@ export const MessageList = forwardRef<HTMLDivElement, MessageListProps>(({
     }
 
     return (
-        <ScrollArea className="h-full" viewportRef={ref as React.RefObject<HTMLDivElement>}>
+        <ScrollArea className="h-full w-full" viewportRef={ref as React.RefObject<HTMLDivElement>}>
             <motion.div 
                 ref={viewportRef}
-                className="p-4 space-y-6"
+                className="px-3 py-4 sm:px-4 space-y-4 sm:space-y-6"
                 variants={messageListVariants}
                 initial="initial"
                 animate="animate"

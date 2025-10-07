@@ -48,8 +48,9 @@ export function MobileProvider({ children }: { children: ReactNode }) {
           console.warn('IndexedDB access failed, falling back to localStorage');
         };
 
-        dbRequest.onupgradeneeded = (event) => {
-          const db = event.target.result;
+        dbRequest.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+          const target = event.target as IDBRequest;
+          const db = target.result as IDBDatabase;
           if (!db.objectStoreNames.contains('settings')) {
             db.createObjectStore('settings', { keyPath: 'id' });
           }
@@ -58,11 +59,15 @@ export function MobileProvider({ children }: { children: ReactNode }) {
         // Try localStorage as fallback
         const saved = localStorage.getItem('mobile_redesign');
         if (saved !== null) {
-          // Persist to IndexedDB for next time
-          const db = dbRequest.result;
-          const transaction = db.transaction(['settings'], 'readwrite');
-          const store = transaction.objectStore('settings');
-          store.put({ id: 'mobile_redesign', value: saved === 'true' });
+          try {
+            // Persist to IndexedDB for next time
+            const db = (dbRequest as IDBOpenDBRequest).result;
+            const transaction = db.transaction(['settings'], 'readwrite');
+            const store = transaction.objectStore('settings');
+            store.put({ id: 'mobile_redesign', value: saved === 'true' });
+          } catch (dbError) {
+            console.warn('Failed to persist to IndexedDB:', dbError);
+          }
           return saved === 'true';
         }
 

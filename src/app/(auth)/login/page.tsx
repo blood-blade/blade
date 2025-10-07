@@ -8,7 +8,7 @@ import { z } from 'zod';
 import React, { useState, useEffect } from 'react';
 import { auth } from '@/lib/firebase';
 import { authService } from '@/lib/auth-service';
-import { sendPasswordResetEmail } from 'firebase/auth';
+import { sendPasswordResetEmail, browserLocalPersistence, setPersistence } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import {
   CardContent,
@@ -256,7 +256,7 @@ export default function LoginPage() {
       }
       
       // Set persistence to LOCAL before sign-in
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      await setPersistence(auth, browserLocalPersistence);
       
       // Prevent automatic reload and set up loading state
       if (typeof window !== 'undefined') {

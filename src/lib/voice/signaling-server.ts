@@ -1,30 +1,12 @@
 import { WebSocket } from 'ws';
 import { VoiceRoom, VoiceRoomParticipant } from '@/lib/voice/types';
-
-/**
- * Signaling message types for WebRTC voice chat
- */
-export enum SignalingMessageType {
-  JOIN_ROOM = 'JOIN_ROOM',
-  LEAVE_ROOM = 'LEAVE_ROOM',
-  OFFER = 'OFFER',
-  ANSWER = 'ANSWER',
-  ICE_CANDIDATE = 'ICE_CANDIDATE',
-  ROOM_INFO = 'ROOM_INFO',
-  PARTICIPANT_UPDATED = 'PARTICIPANT_UPDATED',
-  ERROR = 'ERROR',
-}
-
-/**
- * Structure for signaling messages
- */
-export interface SignalingMessage {
-  type: SignalingMessageType;
-  payload: any;
-  senderId: string;
-  targetId?: string;
-  roomId: string;
-}
+import {
+  SignalingMessage,
+  SignalingMessageType,
+  JoinRoomMessage,
+  RoomInfoMessage,
+  ErrorMessage
+} from './signaling-messages';
 
 export class VoiceSignalingServer {
   private rooms: Map<string, VoiceRoom> = new Map();

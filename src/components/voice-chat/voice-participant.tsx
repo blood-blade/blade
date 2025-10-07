@@ -19,12 +19,25 @@ export function VoiceParticipant({
   isCurrentUser,
 }: VoiceParticipantProps) {
   const [speakingAnimation, setSpeakingAnimation] = useState(false);
+  const [hasAudioActivity, setHasAudioActivity] = useState(false);
 
   useEffect(() => {
     if (isSpeaking) {
-      setSpeakingAnimation(true);
+      // Debounce the speaking animation to prevent flicker
+      const timer = setTimeout(() => {
+        setSpeakingAnimation(true);
+        setHasAudioActivity(true);
+      }, 150);
+
+      return () => clearTimeout(timer);
     } else {
-      setSpeakingAnimation(false);
+      // Add slight delay before removing speaking indication
+      const timer = setTimeout(() => {
+        setSpeakingAnimation(false);
+        setHasAudioActivity(false);
+      }, 300);
+
+      return () => clearTimeout(timer);
     }
   }, [isSpeaking]);
 
